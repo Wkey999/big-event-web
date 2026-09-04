@@ -1,0 +1,206 @@
+/* 《BOOM！大事件》主题层：设计令牌 + 全局玻璃规则。
+   必须在 element-plus/dist/index.css 之后引入（main.js），同优先级选择器后者胜出。
+   teleport 到 body 的组件（el-dialog / el-popper / el-message）scoped 够不到，玻璃规则只能写在这里。 */
+
+:root {
+  /* 主色阶：钢青蓝 #4A6FA5，light-N 为混 N×10% 白，dark-2 为混 20% 黑 */
+  --el-color-primary: #4a6fa5;
+  --el-color-primary-light-3: #809ac0;
+  --el-color-primary-light-5: #a5b7d2;
+  --el-color-primary-light-7: #c9d4e4;
+  --el-color-primary-light-8: #dbe2ed;
+  --el-color-primary-light-9: #edf1f6;
+  --el-color-primary-dark-2: #3b5984;
+
+  /* 语义色跟着降饱和，否则 EP 默认的荧光绿/橙在灰蓝底上会很廉价；
+     只覆盖本项目实际用到的档位（tag 的 light-8/9、link 按钮的 base） */
+  --el-color-success: #5b9a72;
+  --el-color-success-light-8: #deebe3;
+  --el-color-success-light-9: #eff5f1;
+  --el-color-info: #8a94a3;
+  --el-color-info-light-8: #e8eaed;
+  --el-color-info-light-9: #f3f4f6;
+  --el-color-warning: #c99a4b;
+  --el-color-danger: #c0666b;
+  --el-color-error: #c0666b;
+
+  /* 背景：组件本体保持白（表格/输入框可读性），页面级透明露出 body 渐变 */
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: transparent;
+  --el-bg-color-overlay: rgba(252, 253, 255, 0.8);
+
+  /* 文字：石墨灰，不带蓝味也不带黄味 */
+  --el-text-color-primary: #2b3440;
+  --el-text-color-regular: #5a6472;
+  --el-text-color-secondary: #8a94a3;
+  --el-text-color-placeholder: #aab3c0;
+  --el-text-color-disabled: #c6cdd8;
+
+  /* 边框：冷灰系 */
+  --el-border-color: #dce2ea;
+  --el-border-color-light: #e5eaf1;
+  --el-border-color-lighter: #ebeff5;
+  --el-border-color-extra-light: #f2f5f9;
+  --el-border-color-dark: #c7cfda;
+
+  /* 填充：输入框底保持纯白，玻璃感由容器提供 */
+  --el-fill-color: #ebeff5;
+  --el-fill-color-light: #eff2f7;
+  --el-fill-color-lighter: #f5f7fa;
+  --el-fill-color-blank: #ffffff;
+
+  /* 圆角与阴影：苹果感需要比 EP 默认 4px 更大，阴影用石墨灰而不是蓝 */
+  --el-border-radius-base: 10px;
+  --el-border-radius-small: 6px;
+  /* 浮层圆角不跟 base，单独一个变量，不写就还是 EP 默认的 4px */
+  --el-popover-border-radius: 12px;
+  --el-box-shadow: 0 12px 32px rgba(43, 52, 64, 0.1);
+  --el-box-shadow-light: 0 4px 16px rgba(43, 52, 64, 0.07);
+
+  /* 侧边栏菜单：LayoutView 删掉行内颜色属性后由这里接管 */
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: #4c5665;
+  --el-menu-active-color: #4a6fa5;
+  --el-menu-hover-bg-color: rgba(74, 111, 165, 0.08);
+
+  /* el-card 底色透明化，背景由各页玻璃 class 提供 */
+  --el-card-bg-color: transparent;
+
+  /* 玻璃令牌：冷白而不是纯白，纯白在灰蓝背景上会发「塑料白」 */
+  --glass-bg: rgba(252, 253, 255, 0.58);
+  --glass-bg-strong: rgba(252, 253, 255, 0.72);
+  --glass-blur: blur(20px) saturate(150%);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.6);
+  --glass-shadow: 0 8px 32px rgba(43, 52, 64, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+/* 不支持 backdrop-filter 的浏览器降级为近实心冷白，不破碎 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root {
+    --glass-bg: rgba(252, 253, 255, 0.94);
+    --glass-bg-strong: rgba(252, 253, 255, 0.97);
+  }
+}
+
+/* 冷灰蓝渐变是玻璃拟态的前提：纯色背景上 backdrop-filter 看不出效果 */
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Arial, sans-serif;
+  background: linear-gradient(160deg, #f2f4f7 0%, #e4e9f0 45%, #eef1f6 100%);
+  background-attachment: fixed;
+  color: var(--el-text-color-primary);
+}
+
+/* 两个固定柔光色斑，衬出毛玻璃的通透感；灰蓝底上色斑必须更淡，否则显脏 */
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  z-index: -1;
+  border-radius: 50%;
+  filter: blur(80px);
+  pointer-events: none;
+}
+
+body::before {
+  width: 480px;
+  height: 480px;
+  top: -120px;
+  left: -100px;
+  background: radial-gradient(circle, rgba(120, 140, 170, 0.14), transparent 70%);
+}
+
+body::after {
+  width: 560px;
+  height: 560px;
+  bottom: -160px;
+  right: -120px;
+  background: radial-gradient(circle, rgba(150, 165, 185, 0.14), transparent 70%);
+}
+
+/* 细滚动条，配合玻璃外壳 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(43, 52, 64, 0.16);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(43, 52, 64, 0.28);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 管理页 el-card 的统一玻璃外壳：组件里给 el-card 加 class="glass-card" 即可。
+   必须写成 .el-card.glass-card：EP 的 .el-card.is-always-shadow 特异度是 0,2,0，
+   单类名会被它的 box-shadow 盖掉 */
+.el-card.glass-card {
+  background: var(--glass-bg-strong);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  border: var(--glass-border);
+  border-radius: 18px;
+  box-shadow: var(--glass-shadow);
+}
+
+/* 分页器圆角 EP 写死 2px，跟整站 10px 起步的圆润感不搭；带 .el-pagination 才压得过 .el-pager li */
+.el-pagination .btn-prev,
+.el-pagination .btn-next,
+.el-pagination .el-pager li {
+  border-radius: 8px;
+}
+
+/* ---- teleport 到 body 的浮层：玻璃规则只能写在全局层 ---- */
+
+/* EP 默认遮罩是 50% 纯黑，压在浅灰蓝渐变上会把背景压成死灰；换成石墨暗化 + 轻磨砂 */
+.el-overlay {
+  background-color: rgba(35, 44, 56, 0.3);
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+}
+
+.el-overlay-dialog .el-dialog {
+  background: var(--glass-bg-strong);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(43, 52, 64, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+
+.el-dialog__title {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+}
+
+/* wangeditor 自带内联背景，半透明弹窗里工具栏图标对比不足，必须提权拉回纯白 */
+.el-dialog .w-e-toolbar,
+.el-dialog .w-e-text-container,
+.el-dialog .w-e-text-container [data-slate-editor] {
+  background: #ffffff !important;
+}
+
+.el-dialog .el-input__wrapper,
+.el-dialog .el-textarea__inner {
+  background: #ffffff;
+}
+
+.el-popper.is-light {
+  background: rgba(252, 253, 255, 0.86);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+}
+
+.el-message {
+  background: rgba(252, 253, 255, 0.86);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
