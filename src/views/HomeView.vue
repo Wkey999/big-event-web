@@ -3,12 +3,10 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { listArticles } from '@/api/article'
 import { listCategories } from '@/api/category'
-import { useUserStore } from '@/stores/user'
 import { formatTime } from '@/utils/format'
 import FeedCard from '@/components/FeedCard.vue'
 
 const router = useRouter()
-const userStore = useUserStore()
 
 const PAGE_SIZE = 8
 // 封面宽高比由文章 id 决定：高度在渲染前就可估算，瀑布流分桶不需要量 DOM
@@ -153,7 +151,7 @@ onBeforeUnmount(() => {
           :key="article.id"
           :article="article"
           :category-name="categoryNames.get(article.categoryId) || ''"
-          :author="userStore.userInfo"
+          :author="{ nickname: article.authorNickname, avatar: article.authorAvatar }"
           :ratio="ratioOf(article)"
           @click="openPreview(article)"
         />
