@@ -47,13 +47,12 @@ src/
 前端侧：
 
 - [ ] TypeScript 重构（组件、Pinia store、api 层类型化）
-- [ ] C 端公开信息流：免登录浏览 + 按来源/分类筛选（配合后端多源聚合，接现有瀑布流组件）
+- [ ] C 端公开浏览：免登录看自己的已发布内容（只读模式，不依赖任何抓取）
 - [ ] 评论 / 点赞 / 收藏的 C 端交互
-- [ ] 关注订阅来源，个性化排序展示
 - [ ] 移动端适配与响应式打磨
 - [ ] 构建优化：路由级分包、图片懒加载、Lighthouse 跑分
 
-后端及整体路线图见 [big-event README · 未来规划](https://github.com/Wkey999/big-event#未来规划任务清单)。
+多源资讯聚合方向经评估已**搁置**（维护成本与抓取合规风险），见 [后端 README · 未来规划](https://github.com/Wkey999/big-event#未来规划任务清单)；完整功能边界见 [功能实现说明书](https://github.com/Wkey999/big-event/blob/master/docs/%E5%8A%9F%E8%83%BD%E5%AE%9E%E7%8E%B0%E8%AF%B4%E6%98%8E%E4%B9%A6.md)。
 
 ## License
 
