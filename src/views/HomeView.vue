@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { listArticles } from '@/api/article'
+import { getArticleDetail, listArticles } from '@/api/article'
 import { listCategories } from '@/api/category'
 import { formatTime } from '@/utils/format'
 import FeedCard from '@/components/FeedCard.vue'
@@ -24,10 +24,13 @@ const columnCount = ref(columnCountFor(window.innerWidth))
 const categoryNames = ref(new Map())
 const sentinelEl = ref()
 const preview = ref(null)
+const previewLoading = ref(false)
 
 let sentinelVisible = false
 let io = null
 let resizeTimer = null
+// 组件卸载后必须阻断 loadMore 的自链与状态写入：否则离开首页后仍在后台一页页请求
+let unmounted = false
 
 function columnCountFor(width) {
   if (width >= 1400) return 4
@@ -53,7 +56,10 @@ const columns = computed(() => {
 const previewVisible = computed({
   get: () => preview.value !== null,
   set: (visible) => {
-    if (!visible) preview.value = null
+    if (!visible) {
+      preview.value = null
+      previewLoading.value = false
+    }
   },
 })
 
@@ -64,24 +70,41 @@ async function loadMore() {
   loadError.value = false
   try {
     const res = await listArticles({ pageNum: page.value, pageSize: PAGE_SIZE, state: '已发布' })
+    if (unmounted) return
     // 文章管理页可能并发增删导致页码漂移，按 id 去重
     const seen = new Set(items.value.map((a) => a.id))
     items.value.push(...res.data.items.filter((a) => !seen.has(a.id)))
     total.value = res.data.total
-    finished.value = items.value.length >= total.value
+    // 短页判定兜底：本页不满说明已到底。只靠 items.length >= total 时，
+    // 跨页重复被去重掉会让它永远差几条，自链就退化成无限请求（实测症状：一直转圈请求）
+    finished.value = res.data.items.length < PAGE_SIZE || items.value.length >= total.value
     page.value += 1
   } catch {
     // 错误提示已由 axios 拦截器弹出，这里只负责把哨兵切成重试态
-    loadError.value = true
+    if (!unmounted) loadError.value = true
+  } finally {
+    if (!unmounted) loading.value = false
   }
+  if (unmounted) return
   // 必须先解除 loading 再自链，否则递归调用会被上面的守卫直接挡回
-  loading.value = false
   await nextTick()
   if (sentinelVisible && !finished.value && !loadError.value) loadMore()
 }
 
-function openPreview(article) {
-  preview.value = article
+async function openPreview(article) {
+  // 列表已收窄列不含正文，打开预览时才拉全文——这才算一次真实阅读，
+  // 顺便让浏览量增长有意义（此前列表自带 content，没人会调 detail）
+  preview.value = { ...article, content: '' }
+  previewLoading.value = true
+  try {
+    const res = await getArticleDetail(article.id)
+    // 用户可能已关掉弹窗或点了另一张卡，回来只认当前这张
+    if (preview.value && preview.value.id === article.id) preview.value = res.data
+  } catch {
+    // 错误提示已由 axios 拦截器统一弹出
+  } finally {
+    previewLoading.value = false
+  }
 }
 
 function handleResize() {
@@ -115,6 +138,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  unmounted = true
   io?.disconnect()
   clearTimeout(resizeTimer)
   window.removeEventListener('resize', handleResize)
@@ -170,8 +194,11 @@ onBeforeUnmount(() => {
         <span>{{ formatTime(preview.createTime) }}</span>
         <span>浏览 {{ preview.viewCount }}</span>
       </div>
-      <!-- 列表按 userId 隔离，content 永远是登录者自己写的；将来若做公开信息流，这里必须先 sanitize -->
-      <div v-if="preview" class="preview-content" v-html="preview.content"></div>
+      <!-- 正文来自 /article/detail（打开预览才拉，浏览量 +1） -->
+      <el-skeleton v-if="previewLoading" :rows="6" animated />
+      <!-- 信息流已全站共享，这篇正文是别人写的：v-html 渲染他人 HTML 存在存储型 XSS 风险，
+           上线前必须过一层 sanitize（DOMPurify），当前仅作受信任作者范围内的过渡方案 -->
+      <div v-else-if="preview" class="preview-content" v-html="preview.content"></div>
     </el-dialog>
   </div>
 </template>

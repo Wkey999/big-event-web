@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowR
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import '@wangeditor/editor/dist/css/style.css'
-import { addArticle, deleteArticle, listArticles, updateArticle } from '@/api/article'
+import { addArticle, deleteArticle, getArticleForEdit, listArticles, updateArticle } from '@/api/article'
 import { listCategories } from '@/api/category'
 import { uploadImage } from '@/api/user'
 import { formatTime } from '@/utils/format'
@@ -153,17 +153,37 @@ function handleSizeChange(size) {
   loadArticles()
 }
 
-function openDialog(id, row) {
-  editingId.value = id
-  Object.assign(form, {
-    title: row?.title ?? '',
-    // 直接用列表行里的 content 预填，不调 /article/detail/{id}——那个接口每调一次浏览量 +1
-    content: row?.content ?? '',
-    coverImg: row?.coverImg ?? '',
-    summary: row?.summary ?? '',
-    categoryId: row?.categoryId ?? undefined,
-    state: row?.state ?? 1,
-  })
+async function openDialog(id, row) {
+  if (id) {
+    let full
+    try {
+      // 列表已收窄列不返回正文，编辑前单独取全文（走 /article/edit：不增加浏览量）。
+      // 拉取失败就直接不打开弹窗——否则表单里是空正文，保存会把原文覆盖成空
+      full = (await getArticleForEdit(id)).data
+    } catch {
+      // 错误提示已由 axios 拦截器统一弹出
+      return
+    }
+    editingId.value = id
+    Object.assign(form, {
+      title: full.title ?? '',
+      content: full.content ?? '',
+      coverImg: full.coverImg ?? '',
+      summary: full.summary ?? '',
+      categoryId: full.categoryId ?? undefined,
+      state: full.state ?? 1,
+    })
+  } else {
+    editingId.value = null
+    Object.assign(form, {
+      title: '',
+      content: '',
+      coverImg: '',
+      summary: '',
+      categoryId: undefined,
+      state: 1,
+    })
+  }
   dialogVisible.value = true
   nextTick(() => formRef.value?.clearValidate())
 }
