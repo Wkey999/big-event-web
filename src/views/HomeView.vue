@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { getArticleDetail, listArticles, reportBrowse } from '@/api/article'
+import { actOnArticle, getArticleDetail, listArticles, reportBrowse } from '@/api/article'
 import { listCategories } from '@/api/category'
 import { formatTime } from '@/utils/format'
 import FeedCard from '@/components/FeedCard.vue'
@@ -88,6 +88,31 @@ function flushPreviewDwell() {
   previewArticleId = null
   previewEnteredAt = 0
   sendBrowse(id, dwellMs)
+}
+
+// ---- 点赞 / 收藏（阶段 A 的高权重信号）----
+const actioning = ref(false)
+
+async function toggleAction(actionType) {
+  const article = preview.value
+  if (!article || actioning.value) return
+  const isOn = actionType === 1 ? article.liked : article.collected
+  actioning.value = true
+  try {
+    await actOnArticle(article.id, actionType, isOn ? 0 : 1)
+    // 后端幂等，这里只做展示层同步（失败会走 catch，状态不变）
+    if (actionType === 1) {
+      article.liked = !isOn
+      article.likeCount = Math.max((article.likeCount ?? 0) + (isOn ? -1 : 1), 0)
+    } else {
+      article.collected = !isOn
+      article.collectCount = Math.max((article.collectCount ?? 0) + (isOn ? -1 : 1), 0)
+    }
+  } catch {
+    // 错误提示已由 axios 拦截器统一弹出
+  } finally {
+    actioning.value = false
+  }
 }
 
 function columnCountFor(width) {
@@ -264,6 +289,23 @@ onBeforeUnmount(() => {
         <span>{{ formatTime(preview.createTime) }}</span>
         <span>浏览 {{ preview.viewCount }}</span>
       </div>
+      <!-- 互动状态由 /article/detail 一并返回，按钮无需额外请求 -->
+      <div v-if="preview && !previewLoading" class="preview-actions">
+        <el-button
+          :type="preview.liked ? 'primary' : 'default'"
+          :disabled="actioning"
+          @click="toggleAction(1)"
+        >
+          {{ preview.liked ? '已点赞' : '点赞' }} {{ preview.likeCount ?? 0 }}
+        </el-button>
+        <el-button
+          :type="preview.collected ? 'warning' : 'default'"
+          :disabled="actioning"
+          @click="toggleAction(2)"
+        >
+          {{ preview.collected ? '已收藏' : '收藏' }} {{ preview.collectCount ?? 0 }}
+        </el-button>
+      </div>
       <!-- 正文来自 /article/detail（打开预览才拉，浏览量 +1） -->
       <el-skeleton v-if="previewLoading" :rows="6" animated />
       <!-- 信息流已全站共享，这篇正文是别人写的：v-html 渲染他人 HTML 存在存储型 XSS 风险，
@@ -340,6 +382,12 @@ onBeforeUnmount(() => {
   margin-bottom: 16px;
   font-size: 13px;
   color: var(--el-text-color-secondary);
+}
+
+.preview-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .preview-content :deep(img) {

@@ -26,3 +26,8 @@ export const deleteArticle = (id) => request.delete(`/article/delete/${id}`)
 // 同一篇文章 60 秒内重复上报由后端合并为一行，前端可以放心多报。
 export const reportBrowse = (articleId, dwellMs = 0) =>
   request.post('/article/browse', { articleId, dwellMs }, { silent: true })
+
+// 点赞/收藏：actionType 1-点赞 2-收藏，op 1-执行 0-取消。
+// 后端幂等（重复点不重复计数），所以前端可以放心用「本地乐观更新 + 失败靠拦截器提示」。
+export const actOnArticle = (articleId, actionType, op) =>
+  request.post('/article/action', { articleId, actionType, op })
