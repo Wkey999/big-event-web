@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { getArticleDetail, listArticles } from '@/api/article'
+import { getArticleDetail, listArticles, reportBrowse } from '@/api/article'
 import { listCategories } from '@/api/category'
 import { formatTime } from '@/utils/format'
 import FeedCard from '@/components/FeedCard.vue'
@@ -32,6 +32,64 @@ let resizeTimer = null
 // 组件卸载后必须阻断 loadMore 的自链与状态写入：否则离开首页后仍在后台一页页请求
 let unmounted = false
 
+// ---- 行为埋点（阶段 A 数据闭环）----
+// 卡片曝光观察器懒创建：卡片要等第一页数据回来才渲染，放在首次 registerCard 里创建最稳
+let cardObserver = null
+const cardEls = new Map()
+// 一次会话内同一篇文章只报一次曝光，避免来回滚动反复触发
+const reportedExposure = new Set()
+// 预览弹窗停留计时：打开记时间戳，关闭时上报真实时长
+let previewArticleId = null
+let previewEnteredAt = 0
+
+function sendBrowse(articleId, dwellMs) {
+  // 埋点不该打扰用户：静默失败（request 拦截器已按 silent 配置跳过提示，这里再兜一层未捕获拒绝）
+  reportBrowse(articleId, dwellMs).catch(() => {})
+}
+
+function handleCardEntries(entries) {
+  for (const entry of entries) {
+    if (!entry.isIntersecting) continue
+    const id = Number(entry.target.dataset.articleId)
+    if (!id || reportedExposure.has(id)) continue
+    reportedExposure.add(id)
+    // 曝光信号：只说明「看到了」，停留时长等关闭预览时再补报
+    sendBrowse(id, 0)
+  }
+}
+
+function registerCard(id, el) {
+  const prev = cardEls.get(id)
+  if (!el) {
+    // 函数式 ref 在卸载时回调 null：显式 unobserve，避免观察器长期持有已移除的节点
+    if (prev) {
+      cardObserver?.unobserve(prev)
+      cardEls.delete(id)
+    }
+    return
+  }
+  cardEls.set(id, el)
+  el.dataset.articleId = String(id)
+  if (!cardObserver) {
+    // 露出一半才算曝光；root 同样必须是 .layout-main，否则滚动容器会把相交矩形裁掉
+    cardObserver = new IntersectionObserver(handleCardEntries, {
+      root: el.closest('.layout-main'),
+      threshold: 0.5,
+    })
+  }
+  cardObserver.observe(el)
+}
+
+function flushPreviewDwell() {
+  if (!previewArticleId || !previewEnteredAt) return
+  // 上限与后端 @Max(300000) 对齐，避免挂机过久被校验拒绝
+  const dwellMs = Math.min(Date.now() - previewEnteredAt, 300000)
+  const id = previewArticleId
+  previewArticleId = null
+  previewEnteredAt = 0
+  sendBrowse(id, dwellMs)
+}
+
 function columnCountFor(width) {
   if (width >= 1400) return 4
   if (width >= 900) return 3
@@ -57,6 +115,8 @@ const previewVisible = computed({
   get: () => preview.value !== null,
   set: (visible) => {
     if (!visible) {
+      // 关闭弹窗即用户读完了这一篇：先补报停留时长，再清状态
+      flushPreviewDwell()
       preview.value = null
       previewLoading.value = false
     }
@@ -94,6 +154,8 @@ async function loadMore() {
 async function openPreview(article) {
   // 列表已收窄列不含正文，打开预览时才拉全文——这才算一次真实阅读，
   // 顺便让浏览量增长有意义（此前列表自带 content，没人会调 detail）
+  previewArticleId = article.id
+  previewEnteredAt = Date.now()
   preview.value = { ...article, content: '' }
   previewLoading.value = true
   try {
@@ -139,6 +201,9 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   unmounted = true
+  // 离开页面时如果预览还开着，把这段停留也补报掉，否则计时丢失
+  flushPreviewDwell()
+  cardObserver?.disconnect()
   io?.disconnect()
   clearTimeout(resizeTimer)
   window.removeEventListener('resize', handleResize)
@@ -170,15 +235,20 @@ onBeforeUnmount(() => {
 
     <div v-else class="feed-columns">
       <div v-for="(col, colIndex) in columns" :key="colIndex" class="feed-col">
-        <FeedCard
+        <!-- 包一层 div 只为拿到可观察的 DOM 节点（组件上的函数式 ref 拿到的是实例不是元素） -->
+        <div
           v-for="article in col"
           :key="article.id"
-          :article="article"
-          :category-name="categoryNames.get(article.categoryId) || ''"
-          :author="{ nickname: article.authorNickname, avatar: article.authorAvatar }"
-          :ratio="ratioOf(article)"
-          @click="openPreview(article)"
-        />
+          :ref="(el) => registerCard(article.id, el)"
+        >
+          <FeedCard
+            :article="article"
+            :category-name="categoryNames.get(article.categoryId) || ''"
+            :author="{ nickname: article.authorNickname, avatar: article.authorAvatar }"
+            :ratio="ratioOf(article)"
+            @click="openPreview(article)"
+          />
+        </div>
       </div>
     </div>
 

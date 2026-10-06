@@ -19,19 +19,24 @@ request.interceptors.request.use((config) => {
 request.interceptors.response.use(
   (response) => {
     const res = response.data
+    // 静默请求（如行为埋点）不弹提示：埋点失败不该打扰用户
+    const silent = response.config?.silent
     // 后端统一响应体：code 0 为成功，其余为业务错误
     if (res.code === 0) {
       return res
     }
-    ElMessage.error(res.message || '请求失败')
+    if (!silent) {
+      ElMessage.error(res.message || '请求失败')
+    }
     return Promise.reject(new Error(res.message))
   },
   (error) => {
+    const silent = error.config?.silent
     if (error.response?.status === 401) {
       localStorage.removeItem('token')
       ElMessage.error('登录状态已失效，请重新登录')
       router.push('/login')
-    } else {
+    } else if (!silent) {
       ElMessage.error(error.response?.data?.message || '网络异常，请稍后重试')
     }
     return Promise.reject(error)

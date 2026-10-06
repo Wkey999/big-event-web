@@ -20,3 +20,9 @@ export const addArticle = (data) => request.post('/article/add', data)
 export const updateArticle = (data) => request.put('/article/update', data)
 
 export const deleteArticle = (id) => request.delete(`/article/delete/${id}`)
+
+// 行为埋点（阶段 A）：曝光传 dwellMs=0，关闭预览时传真实停留毫秒。
+// silent: true 让拦截器跳过错误提示——埋点失败不打扰用户。
+// 同一篇文章 60 秒内重复上报由后端合并为一行，前端可以放心多报。
+export const reportBrowse = (articleId, dwellMs = 0) =>
+  request.post('/article/browse', { articleId, dwellMs }, { silent: true })
