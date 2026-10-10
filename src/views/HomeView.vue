@@ -10,6 +10,7 @@ import FeedCard from '@/components/FeedCard.vue'
 const router = useRouter()
 
 const PAGE_SIZE = 8
+const RECOMMEND_PAGE_SIZE = 30
 // 封面宽高比由文章 id 决定：高度在渲染前就可估算，瀑布流分桶不需要量 DOM
 const RATIOS = [3 / 4, 1, 4 / 5]
 
@@ -21,6 +22,7 @@ const finished = ref(false)
 const loadError = ref(false)
 // 首次加载由 IntersectionObserver 触发，挂载瞬间还没发起；没有这个标记模板会先闪一下空态
 const started = ref(false)
+const feedMode = ref('latest')
 const columnCount = ref(columnCountFor(window.innerWidth))
 const categoryNames = ref(new Map())
 const sentinelEl = ref()
@@ -30,6 +32,7 @@ const previewLoading = ref(false)
 let sentinelVisible = false
 let io = null
 let resizeTimer = null
+let feedRequestVersion = 0
 // 组件卸载后必须阻断 loadMore 的自链与状态写入：否则离开首页后仍在后台一页页请求
 let unmounted = false
 
@@ -42,15 +45,17 @@ const reportedExposure = new Set()
 // 预览弹窗停留计时：打开记时间戳，关闭时上报真实时长
 let previewArticleId = null
 let previewEnteredAt = 0
+let previewMode = 'latest'
 
-function sendBrowse(articleId, dwellMs) {
+function sendBrowse(articleId, dwellMs, mode = feedMode.value) {
   // 埋点不该打扰用户：静默失败（request 拦截器已按 silent 配置跳过提示，这里再兜一层未捕获拒绝）
-  reportBrowse(articleId, dwellMs).catch(() => {})
+  reportBrowse(articleId, dwellMs, mode).catch(() => {})
 }
 
 function handleCardEntries(entries) {
   for (const entry of entries) {
     if (!entry.isIntersecting) continue
+    if (Number(entry.target.dataset.feedVersion) !== feedRequestVersion) continue
     const id = Number(entry.target.dataset.articleId)
     if (!id || reportedExposure.has(id)) continue
     reportedExposure.add(id)
@@ -71,6 +76,7 @@ function registerCard(id, el) {
   }
   cardEls.set(id, el)
   el.dataset.articleId = String(id)
+  el.dataset.feedVersion = String(feedRequestVersion)
   if (!cardObserver) {
     // 露出一半才算曝光；root 同样必须是 .layout-main，否则滚动容器会把相交矩形裁掉
     cardObserver = new IntersectionObserver(handleCardEntries, {
@@ -88,7 +94,7 @@ function flushPreviewDwell() {
   const id = previewArticleId
   previewArticleId = null
   previewEnteredAt = 0
-  sendBrowse(id, dwellMs)
+  sendBrowse(id, dwellMs, previewMode)
 }
 
 // ---- 点赞 / 收藏（阶段 A 的高权重信号）----
@@ -153,30 +159,58 @@ const sanitizedPreviewContent = computed(() => sanitizeRichText(preview.value?.c
 
 async function loadMore() {
   if (loading.value || finished.value) return
+  const requestVersion = feedRequestVersion
+  const requestMode = feedMode.value
+  const pageSize = requestMode === 'recommend' ? RECOMMEND_PAGE_SIZE : PAGE_SIZE
   loading.value = true
   started.value = true
   loadError.value = false
   try {
-    const res = await listArticles({ pageNum: page.value, pageSize: PAGE_SIZE, state: '已发布' })
-    if (unmounted) return
+    const res = await listArticles({
+      pageNum: page.value,
+      pageSize,
+      state: '已发布',
+      mode: requestMode,
+    })
+    if (unmounted || requestVersion !== feedRequestVersion) return
     // 文章管理页可能并发增删导致页码漂移，按 id 去重
     const seen = new Set(items.value.map((a) => a.id))
     items.value.push(...res.data.items.filter((a) => !seen.has(a.id)))
     total.value = res.data.total
     // 短页判定兜底：本页不满说明已到底。只靠 items.length >= total 时，
     // 跨页重复被去重掉会让它永远差几条，自链就退化成无限请求（实测症状：一直转圈请求）
-    finished.value = res.data.items.length < PAGE_SIZE || items.value.length >= total.value
+    finished.value = requestMode === 'recommend'
+      || res.data.items.length < pageSize
+      || items.value.length >= total.value
     page.value += 1
   } catch {
     // 错误提示已由 axios 拦截器弹出，这里只负责把哨兵切成重试态
-    if (!unmounted) loadError.value = true
+    if (!unmounted && requestVersion === feedRequestVersion) loadError.value = true
   } finally {
-    if (!unmounted) loading.value = false
+    if (!unmounted && requestVersion === feedRequestVersion) loading.value = false
   }
-  if (unmounted) return
+  if (unmounted || requestVersion !== feedRequestVersion || requestMode === 'recommend') return
   // 必须先解除 loading 再自链，否则递归调用会被上面的守卫直接挡回
   await nextTick()
   if (sentinelVisible && !finished.value && !loadError.value) loadMore()
+}
+
+function switchFeedMode(nextMode) {
+  if (nextMode !== 'latest' && nextMode !== 'recommend') return
+  if (nextMode === feedMode.value) return
+  // 用旧模式结算当前预览停留，再切换并重新加载，避免错误归因或旧请求串入新信息流。
+  if (preview.value) previewVisible.value = false
+  feedRequestVersion += 1
+  feedMode.value = nextMode
+  items.value = []
+  total.value = 0
+  page.value = 1
+  loading.value = false
+  finished.value = false
+  loadError.value = false
+  started.value = false
+  reportedExposure.clear()
+  nextTick(() => loadMore())
 }
 
 async function openPreview(article) {
@@ -184,6 +218,7 @@ async function openPreview(article) {
   // 顺便让浏览量增长有意义（此前列表自带 content，没人会调 detail）
   previewArticleId = article.id
   previewEnteredAt = Date.now()
+  previewMode = feedMode.value
   preview.value = { ...article, content: '' }
   previewLoading.value = true
   try {
@@ -241,8 +276,21 @@ onBeforeUnmount(() => {
 <template>
   <div class="feed">
     <header class="feed-header">
-      <h2>动态</h2>
-      <span v-if="total > 0" class="count">共 {{ total }} 篇</span>
+      <div class="feed-title">
+        <h2>动态</h2>
+        <span v-if="total > 0" class="count">
+          {{ feedMode === 'recommend' ? `本页推荐 ${items.length} 篇` : `共 ${total} 篇` }}
+        </span>
+      </div>
+      <el-radio-group
+        :model-value="feedMode"
+        size="small"
+        aria-label="信息流模式"
+        @update:model-value="switchFeedMode"
+      >
+        <el-radio-button value="recommend">为你推荐</el-radio-button>
+        <el-radio-button value="latest">最新</el-radio-button>
+      </el-radio-group>
     </header>
 
     <div v-if="items.length === 0 && !loadError && (loading || !started)" class="feed-columns">
@@ -320,9 +368,17 @@ onBeforeUnmount(() => {
 <style scoped>
 .feed-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.feed-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
 }
 
 .feed-header h2 {
