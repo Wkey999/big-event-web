@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { actOnArticle, getArticleDetail, listArticles, reportBrowse } from '@/api/article'
 import { listCategories } from '@/api/category'
 import { formatTime } from '@/utils/format'
+import { sanitizeRichText } from '@/utils/sanitizeRichText'
 import FeedCard from '@/components/FeedCard.vue'
 
 const router = useRouter()
@@ -147,6 +148,8 @@ const previewVisible = computed({
     }
   },
 })
+
+const sanitizedPreviewContent = computed(() => sanitizeRichText(preview.value?.content))
 
 async function loadMore() {
   if (loading.value || finished.value) return
@@ -308,9 +311,8 @@ onBeforeUnmount(() => {
       </div>
       <!-- 正文来自 /article/detail（打开预览才拉，浏览量 +1） -->
       <el-skeleton v-if="previewLoading" :rows="6" animated />
-      <!-- 信息流已全站共享，这篇正文是别人写的：v-html 渲染他人 HTML 存在存储型 XSS 风险，
-           上线前必须过一层 sanitize（DOMPurify），当前仅作受信任作者范围内的过渡方案 -->
-      <div v-else-if="preview" class="preview-content" v-html="preview.content"></div>
+      <!-- 文章正文来自用户输入，渲染前经过 DOMPurify 标签、属性、URI 与样式白名单清洗 -->
+      <div v-else-if="preview" class="preview-content" v-html="sanitizedPreviewContent"></div>
     </el-dialog>
   </div>
 </template>

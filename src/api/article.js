@@ -1,8 +1,6 @@
 import request from '@/utils/request'
 
-// state 在读写两端类型不一样，这是后端的历史设计，前端必须两头适配：
-// - 列表筛选传中文「草稿」/「已发布」（parseState 只认这两个词，传 0/1 会静默退化成「不筛选」）
-// - 新增/修改传数字 0(草稿) / 1(已发布)
+// 写接口使用数字 0(草稿) / 1(已发布)；列表筛选兼容数字和中文「草稿」/「已发布」。
 export const listArticles = (params) => request.get('/article/list', { params })
 
 // 列表接口已收窄列，不返回 content（正文 TEXT 不再随卡片列表传输）。
