@@ -25,6 +25,21 @@ const router = createRouter({
       children: [
         { path: '', name: 'home', component: HomeView },
         {
+          path: 'search',
+          name: 'search',
+          component: () => import('@/views/SearchView.vue'),
+        },
+        {
+          path: 'ask',
+          name: 'ask',
+          component: () => import('@/views/AskView.vue'),
+        },
+        {
+          path: 'read/:id',
+          name: 'read',
+          component: () => import('@/views/ArticleReadView.vue'),
+        },
+        {
           path: 'category',
           name: 'category',
           component: () => import('@/views/category/CategoryManageView.vue'),

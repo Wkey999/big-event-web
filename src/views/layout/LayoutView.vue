@@ -34,6 +34,8 @@ function handleCommand(command) {
       <div class="logo"><span class="logo-boom">BOOM！</span><span class="logo-name">大事件</span></div>
       <el-menu :default-active="route.path" router>
         <el-menu-item index="/">首页</el-menu-item>
+        <el-menu-item index="/search">搜索</el-menu-item>
+        <el-menu-item index="/ask">AI 问答</el-menu-item>
         <el-menu-item index="/category">文章分类</el-menu-item>
         <el-menu-item index="/article">文章管理</el-menu-item>
         <el-menu-item index="/profile">个人中心</el-menu-item>
