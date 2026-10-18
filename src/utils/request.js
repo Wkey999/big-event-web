@@ -32,10 +32,12 @@ request.interceptors.response.use(
   },
   (error) => {
     const silent = error.config?.silent
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 && error.config?.headers?.Authorization === `Bearer ${localStorage.getItem('token')}`) {
       localStorage.removeItem('token')
-      ElMessage.error('登录状态已失效，请重新登录')
-      router.push('/login')
+      if (router.currentRoute.value.meta.requiresAuth) {
+        ElMessage.error('登录状态已失效，请重新登录')
+        router.replace({ name: 'login', query: { redirect: router.currentRoute.value.fullPath } })
+      }
     } else if (!silent) {
       ElMessage.error(error.response?.data?.message || '网络异常，请稍后重试')
     }

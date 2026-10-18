@@ -104,6 +104,8 @@ onMounted(loadCategories)
 </script>
 
 <template>
+  <section class="workspace-page">
+  <header class="page-heading"><div><span class="eyebrow">COMMUNITY CHANNELS</span><h1>频道管理</h1><p>让内容有清楚的归属，让读者更容易发现。</p></div></header>
   <el-card class="glass-card">
     <div class="toolbar">
       <el-button type="primary" @click="openDialog(null)">新增分类</el-button>
@@ -155,6 +157,7 @@ onMounted(loadCategories)
       </template>
     </el-dialog>
   </el-card>
+  </section>
 </template>
 
 <style scoped>

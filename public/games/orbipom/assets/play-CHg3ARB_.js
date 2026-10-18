@@ -1,0 +1,1 @@
+import{t as e}from"./navigation-BU7bmSWS.js";window.location.replace(`${e(`/play/game.html`)}?lang=zh-cn`);

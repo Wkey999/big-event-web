@@ -2,10 +2,11 @@ import request from '@/utils/request'
 
 // 写接口使用数字 0(草稿) / 1(已发布)；列表筛选兼容数字和中文「草稿」/「已发布」。
 export const listArticles = (params) => request.get('/article/list', { params })
+export const listMyArticles = (params) => request.get('/article/mine', { params })
 
 export const searchArticles = (params) => request.get('/article/search', { params })
 
-export const askArticle = (question) => request.post('/article/ask', { question })
+export const askArticle = (question) => request.post('/article/ask', { question }, { timeout: 60000, silent: true })
 
 // 列表接口已收窄列，不返回 content（正文 TEXT 不再随卡片列表传输）。
 // 需要正文的两条路径：

@@ -1,238 +1,80 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { listCategories } from '@/api/category'
 import { searchArticles } from '@/api/article'
 import { formatTime } from '@/utils/format'
-
-const PAGE_SIZE = 10
+import AppIcon from '@/components/AppIcon.vue'
+import ContentState from '@/components/ContentState.vue'
 const route = useRoute()
 const router = useRouter()
-
-const filters = reactive({
-  keyword: '',
-  categoryId: undefined,
-  authorId: undefined,
-  timeRange: 'all',
-  orderBy: 'latest',
-})
+const PAGE_SIZE = 10
+const filters = reactive({ keyword: '', categoryId: undefined, timeRange: 'all', orderBy: 'latest' })
 const categories = ref([])
 const items = ref([])
 const total = ref(0)
-const pageNum = ref(1)
+const page = ref(1)
 const loading = ref(false)
+const error = ref(false)
 const searched = ref(false)
-const errorMessage = ref('')
-let requestVersion = 0
-
-function readRouteQuery() {
-  filters.keyword = String(route.query.keyword || '')
-  filters.categoryId = route.query.categoryId ? Number(route.query.categoryId) : undefined
-  filters.authorId = route.query.authorId ? Number(route.query.authorId) : undefined
-  filters.timeRange = String(route.query.timeRange || 'all')
-  filters.orderBy = String(route.query.orderBy || 'latest')
-  pageNum.value = Math.max(Number(route.query.pageNum) || 1, 1)
+const activeKeyword = ref('')
+let version = 0
+function query() {
+  const q = { keyword: filters.keyword.trim(), timeRange: filters.timeRange, orderBy: filters.orderBy, pageNum: String(page.value) }
+  if (filters.categoryId) q.categoryId = String(filters.categoryId)
+  if (route.query.authorId) q.authorId = String(route.query.authorId)
+  return q
 }
-
-function queryParams() {
-  return {
-    keyword: filters.keyword.trim(),
-    pageNum: pageNum.value,
-    pageSize: PAGE_SIZE,
-    categoryId: filters.categoryId || undefined,
-    authorId: filters.authorId || undefined,
-    timeRange: filters.timeRange,
-    orderBy: filters.orderBy,
-  }
-}
-
-async function runSearch({ resetPage = true, updateRoute = true } = {}) {
-  const keyword = filters.keyword.trim()
-  if (!keyword) {
-    errorMessage.value = '请输入搜索关键词'
-    items.value = []
-    total.value = 0
-    searched.value = true
-    return
-  }
-  if (resetPage) pageNum.value = 1
-  const version = ++requestVersion
-  loading.value = true
-  errorMessage.value = ''
-  searched.value = true
-
-  if (updateRoute) {
-    const query = { keyword, pageNum: String(pageNum.value), timeRange: filters.timeRange, orderBy: filters.orderBy }
-    if (filters.categoryId) query.categoryId = String(filters.categoryId)
-    if (filters.authorId) query.authorId = String(filters.authorId)
-    await router.replace({ name: 'search', query })
-  }
-
+async function fetchResults() {
+  const current = ++version
+  const keyword = String(route.query.keyword || '').trim().slice(0, 100)
+  activeKeyword.value = keyword
+  if (!keyword) { items.value = []; total.value = 0; searched.value = false; loading.value = false; return }
+  searched.value = true; loading.value = true; error.value = false
   try {
-    const response = await searchArticles(queryParams())
-    if (version !== requestVersion) return
-    items.value = response.data.items
-    total.value = response.data.total
-  } catch (error) {
-    if (version !== requestVersion) return
-    errorMessage.value = error.message || '搜索失败，请稍后重试'
-    items.value = []
-    total.value = 0
-  } finally {
-    if (version === requestVersion) loading.value = false
-  }
+    const response = await searchArticles({ keyword, categoryId: filters.categoryId, timeRange: filters.timeRange, orderBy: filters.orderBy, authorId: route.query.authorId || undefined, pageNum: page.value, pageSize: PAGE_SIZE })
+    if (current !== version) return
+    items.value = response.data.items || []
+    total.value = response.data.total || 0
+  } catch { if (current === version) { error.value = true; items.value = [] } }
+  finally { if (current === version) loading.value = false }
 }
-
-function changePage(nextPage) {
-  pageNum.value = nextPage
-  runSearch({ resetPage: false })
+async function submit(resetPage = true) {
+  if (!filters.keyword.trim()) return
+  if (resetPage) page.value = 1
+  const next = query()
+  if (JSON.stringify(next) === JSON.stringify(route.query)) await fetchResults()
+  else await router.push({ name: 'search', query: next })
 }
-
-function openArticle(article) {
-  router.push({ name: 'read', params: { id: article.id }, query: { mode: 'search' } })
-}
-
-function highlightSnippet(text) {
-  const value = String(text || '')
-  const needle = filters.keyword.trim().slice(0, 58)
-  if (!needle) return [{ text: value, hit: false }]
+function changePage(value) { page.value = value; submit(false) }
+function highlight(text) {
+  const value = text || '', needle = activeKeyword.value
   const index = value.toLowerCase().indexOf(needle.toLowerCase())
-  if (index < 0) return [{ text: value, hit: false }]
-  const end = index + needle.length
-  return [
-    ...(index > 0 ? [{ text: value.slice(0, index), hit: false }] : []),
-    { text: value.slice(index, end), hit: true },
-    ...(end < value.length ? [{ text: value.slice(end), hit: false }] : []),
-  ]
+  if (index < 0 || !needle) return [{ text: value }]
+  return [{ text: value.slice(0, index) }, { text: value.slice(index, index + needle.length), hit: true }, { text: value.slice(index + needle.length) }]
 }
-
-onMounted(async () => {
-  readRouteQuery()
-  try {
-    const response = await listCategories()
-    categories.value = response.data
-  } catch {
-    // The category filter is optional; keyword search remains available.
-  }
-  if (filters.keyword.trim()) runSearch({ resetPage: false, updateRoute: false })
-})
+watch(() => route.query, q => {
+  filters.keyword = String(q.keyword || '').slice(0, 100)
+  filters.categoryId = Number(q.categoryId) > 0 ? Number(q.categoryId) : undefined
+  filters.timeRange = ['all', '1d', '7d', '30d'].includes(q.timeRange) ? q.timeRange : 'all'
+  filters.orderBy = q.orderBy === 'popular' ? 'popular' : 'latest'
+  page.value = Math.max(1, Math.min(100000, Math.floor(Number(q.pageNum)) || 1))
+  fetchResults()
+}, { immediate: true })
+onMounted(() => listCategories().then(response => { categories.value = response.data }).catch(() => {}))
+onBeforeUnmount(() => version++)
 </script>
-
 <template>
   <section class="search-page">
-    <header class="search-heading">
-      <div>
-        <h1>搜索文章</h1>
-        <p>仅检索已发布内容的标题和摘要</p>
-      </div>
-    </header>
-
-    <el-card shadow="never" class="search-panel">
-      <el-form @submit.prevent="runSearch()">
-        <el-form-item>
-          <el-input
-            v-model="filters.keyword"
-            maxlength="100"
-            clearable
-            size="large"
-            placeholder="输入标题或摘要关键词"
-            @keyup.enter="runSearch()"
-          >
-            <template #append>
-              <el-button :loading="loading" @click="runSearch()">搜索</el-button>
-            </template>
-          </el-input>
-        </el-form-item>
-        <div class="search-filters">
-          <el-select v-model="filters.categoryId" clearable placeholder="全部频道">
-            <el-option v-for="category in categories" :key="category.id" :label="category.categoryName" :value="category.id" />
-          </el-select>
-          <el-input-number v-model="filters.authorId" :min="1" :precision="0" :controls="false" placeholder="作者ID" />
-          <el-select v-model="filters.timeRange" aria-label="发布时间">
-            <el-option label="全部时间" value="all" />
-            <el-option label="最近24小时" value="1d" />
-            <el-option label="最近7天" value="7d" />
-            <el-option label="最近30天" value="30d" />
-          </el-select>
-          <el-select v-model="filters.orderBy" aria-label="排序方式">
-            <el-option label="最新发布" value="latest" />
-            <el-option label="最受欢迎" value="popular" />
-          </el-select>
-        </div>
-      </el-form>
-    </el-card>
-
-    <p v-if="errorMessage" class="search-error">{{ errorMessage }}</p>
-    <div v-else-if="loading" class="search-loading"><el-skeleton :rows="5" animated /></div>
-    <el-empty v-else-if="searched && items.length === 0" description="没有找到匹配文章" />
-
-    <template v-else-if="items.length">
-      <p class="result-count">找到 {{ total }} 篇已发布文章</p>
-      <div class="result-list">
-        <el-card v-for="item in items" :key="item.id" shadow="hover" class="result-card">
-          <div class="result-cover" @click="openArticle(item)">
-            <img v-if="item.coverImg" :src="item.coverImg" :alt="item.title" loading="lazy" />
-            <div v-else class="cover-placeholder" />
-          </div>
-          <div class="result-body">
-            <div class="result-meta">
-              <el-tag v-if="item.categoryName" size="small" effect="plain">{{ item.categoryName }}</el-tag>
-              <span>{{ item.authorNickname || '匿名作者' }}</span>
-              <span>{{ formatTime(item.publishedAt) }}</span>
-            </div>
-            <h2 class="result-title" @click="openArticle(item)">{{ item.title }}</h2>
-            <p v-if="item.hitSnippet" class="result-summary">
-              <el-tag size="small" effect="plain">命中{{ item.hitField === 'title' ? '标题' : '摘要' }}</el-tag>
-              <span v-for="(part, index) in highlightSnippet(item.hitSnippet)" :key="index" :class="{ 'search-hit': part.hit }">{{ part.text }}</span>
-            </p>
-            <p v-else class="result-summary">{{ item.summary || '暂无摘要' }}</p>
-            <div class="result-footer">
-              <span>浏览 {{ item.viewCount || 0 }} · 点赞 {{ item.likeCount || 0 }} · 收藏 {{ item.collectCount || 0 }}</span>
-              <el-button type="primary" link @click="openArticle(item)">阅读文章</el-button>
-            </div>
-          </div>
-        </el-card>
-      </div>
-      <el-pagination
-        v-if="total > PAGE_SIZE"
-        class="search-pagination"
-        background
-        layout="prev, pager, next, total"
-        :current-page="pageNum"
-        :page-size="PAGE_SIZE"
-        :total="total"
-        @current-change="changePage"
-      />
-    </template>
+    <header class="page-heading"><div><span class="eyebrow">FIND SOMETHING WORTH READING</span><h1>找到你想读的。</h1><p>按关键词查找社区内容，或者换个方式问问 AI。</p></div><RouterLink class="button button-secondary" :to="{ name: 'ask', query: filters.keyword ? { q: filters.keyword } : {} }"><AppIcon name="spark" :size="17" />用 AI 搜索</RouterLink></header>
+    <form class="search-panel surface" @submit.prevent="submit()"><div class="search-input-row"><AppIcon name="search" :size="22" /><input v-model="filters.keyword" maxlength="100" aria-label="文章关键词" placeholder="输入你关心的话题或关键词"><button type="submit" class="button button-primary" :disabled="loading || !filters.keyword.trim()">搜索内容<AppIcon name="arrow" :size="16" /></button></div><div class="search-filters"><span>筛选</span><el-select v-model="filters.categoryId" clearable placeholder="全部频道" aria-label="频道"><el-option v-for="category in categories" :key="category.id" :value="category.id" :label="category.categoryName" /></el-select><el-select v-model="filters.timeRange" aria-label="发布时间"><el-option label="全部时间" value="all" /><el-option label="最近24小时" value="1d" /><el-option label="最近7天" value="7d" /><el-option label="最近30天" value="30d" /></el-select><el-select v-model="filters.orderBy" aria-label="排序"><el-option label="最新发布" value="latest" /><el-option label="最受欢迎" value="popular" /></el-select><button class="text-action" type="submit" :disabled="loading || !filters.keyword.trim()">应用筛选</button></div></form>
+    <div v-if="loading" class="search-skeleton surface"><el-skeleton :rows="8" animated /></div>
+    <ContentState v-else-if="error" error title="搜索暂时没有完成" description="请检查连接后再试一次。" @retry="fetchResults" />
+    <ContentState v-else-if="!searched" title="从一个关键词开始" description="工具、技术、开发中的问题，都可以成为发现的起点。" />
+    <ContentState v-else-if="!items.length" title="还没有找到相关内容" description="试试更简短的关键词，或扩大发布时间范围。"><RouterLink class="button button-secondary" :to="{ name: 'ask', query: { q: filters.keyword } }"><AppIcon name="spark" :size="16" />让 AI 试试看</RouterLink></ContentState>
+    <template v-else><p class="result-count">与「{{ activeKeyword }}」相关的 {{ total }} 篇内容</p><div class="result-list"><article v-for="item in items" :key="item.id" class="result-card surface"><RouterLink class="result-cover" :to="{ name: 'read', params: { id: item.id }, query: { mode: 'search' } }" :aria-label="item.title"><img v-if="item.coverImg" :src="item.coverImg" :alt="item.title" loading="lazy" @error="$event.target.style.display = 'none'"><span v-else>{{ item.categoryName || 'BOOM' }}</span></RouterLink><div class="result-body"><div class="result-meta"><span class="tag" v-if="item.categoryName">{{ item.categoryName }}</span><span>{{ item.authorNickname || '社区作者' }}</span><span>{{ formatTime(item.publishedAt) }}</span></div><RouterLink class="result-title" :to="{ name: 'read', params: { id: item.id }, query: { mode: 'search' } }"><h2>{{ item.title }}</h2></RouterLink><p class="result-summary"><span v-for="(part, i) in highlight(item.hitSnippet || item.summary)" :key="i" :class="{ 'search-hit': part.hit }">{{ part.text }}</span></p><div class="result-footer"><span><AppIcon name="eye" :size="14" />{{ item.viewCount || 0 }}<AppIcon name="heart" :size="14" />{{ item.likeCount || 0 }}</span><RouterLink class="text-action" :to="{ name: 'read', params: { id: item.id }, query: { mode: 'search' } }">读这篇<AppIcon name="external" :size="15" /></RouterLink></div></div></article></div><el-pagination v-if="total > PAGE_SIZE" class="search-pagination" background layout="prev, pager, next, total" :current-page="page" :page-size="PAGE_SIZE" :total="total" @current-change="changePage" /></template>
   </section>
 </template>
-
 <style scoped>
-.search-page { max-width: 1000px; margin: 0 auto; }
-.search-heading h1 { margin: 0; font-size: 24px; color: var(--el-text-color-primary); }
-.search-heading p { margin: 6px 0 18px; color: var(--el-text-color-secondary); }
-.search-panel { margin-bottom: 20px; border-radius: 16px; }
-.search-filters { display: flex; flex-wrap: wrap; gap: 10px; }
-.search-filters > * { width: 180px; }
-.search-error { color: var(--el-color-danger); }
-.search-loading { padding: 20px; }
-.result-count { color: var(--el-text-color-secondary); font-size: 13px; }
-.result-list { display: grid; gap: 14px; }
-.result-card { border-radius: 14px; }
-.result-card :deep(.el-card__body) { display: grid; grid-template-columns: 180px 1fr; gap: 18px; }
-.result-cover { width: 180px; height: 132px; overflow: hidden; border-radius: 10px; background: var(--el-fill-color-light); cursor: pointer; }
-.result-cover img, .cover-placeholder { width: 100%; height: 100%; object-fit: cover; }
-.result-body { min-width: 0; }
-.result-meta, .result-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--el-text-color-secondary); font-size: 12px; }
-.result-title { margin: 8px 0; font-size: 17px; cursor: pointer; }
-.result-title:hover { color: var(--el-color-primary); }
-.result-summary { margin: 0 0 12px; color: var(--el-text-color-regular); line-height: 1.6; }
-.search-hit { color: var(--el-color-danger); font-weight: 700; background: var(--el-color-danger-light-9); }
-.result-footer { justify-content: space-between; }
-.search-pagination { justify-content: center; margin: 22px 0; }
-@media (max-width: 640px) {
-  .result-card :deep(.el-card__body) { grid-template-columns: 1fr; }
-  .result-cover { width: 100%; height: 190px; }
-  .search-filters > * { flex: 1 1 140px; width: auto; }
-}
+.search-page{max-width:1080px;margin:auto}.search-panel{padding:20px 25px}.search-input-row{display:flex;gap:15px;align-items:center}.search-input-row>svg{color:var(--brand)}.search-input-row input{flex:1;min-width:0;border:0;background:none;outline-offset:8px;font-size:16px;padding:9px;color:var(--ink)}.search-filters{display:flex;align-items:center;gap:12px;border-top:1px solid var(--line);padding-top:18px;margin-top:18px}.search-filters>span{font-size:12px;color:var(--muted);margin-right:6px}.search-filters>.el-select{width:160px}.search-filters .text-action{margin-left:auto;font-size:12px}.search-skeleton{padding:32px;margin-top:24px}.result-count{font-size:12px;color:var(--muted);margin:25px 0 16px}.result-list{display:grid;gap:15px}.result-card{display:grid;grid-template-columns:195px minmax(0,1fr);gap:24px;padding:20px}.result-cover{display:grid;place-items:center;width:195px;min-height:144px;overflow:hidden;border-radius:8px;background:var(--soft);text-decoration:none;color:var(--brand);font-size:23px}.result-cover img{width:100%;height:100%;max-height:165px;object-fit:cover}.result-body{min-width:0}.result-meta{display:flex;align-items:center;gap:12px;font-size:10px;color:var(--muted)}.result-title{text-decoration:none}.result-title h2{font-size:18px;font-weight:600;line-height:1.6;margin:11px 0 9px}.result-title:hover{color:var(--brand)}.result-summary{font-size:13px;color:var(--text);line-height:1.8;margin:0 0 18px}.search-hit{background:#e7efd9;color:var(--brand);font-weight:600}.result-footer{display:flex;align-items:center;justify-content:space-between;gap:12px}.result-footer>span{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}.result-footer>span svg:nth-of-type(2){margin-left:11px}.result-footer .text-action{font-size:12px}.search-pagination{justify-content:center;margin:30px 0}
 </style>

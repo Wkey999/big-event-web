@@ -2,8 +2,8 @@ import request from '@/utils/request'
 
 export const listCategories = () => request.get('/category/list')
 
-export const addCategory = (data) => request.post('/category/add', data)
+export const addCategory = (data) => request.post('/admin/category', data)
 
-export const updateCategory = (data) => request.put('/category/update', data)
+export const updateCategory = ({ id, ...data }) => request.put(`/admin/category/${id}`, data)
 
-export const deleteCategory = (id) => request.delete(`/category/delete/${id}`)
+export const deleteCategory = (id) => request.delete(`/admin/category/${id}`)

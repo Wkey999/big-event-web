@@ -1,0 +1,1 @@
+function e(e){return`${`/games/orbipom/`.replace(/\/$/,``)}${e===`/`?`/`:e.startsWith(`/`)?e:`/${e}`}`}export{e as t};

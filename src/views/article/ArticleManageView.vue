@@ -3,10 +3,18 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowR
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
 import '@wangeditor/editor/dist/css/style.css'
-import { addArticle, deleteArticle, getArticleForEdit, listArticles, updateArticle } from '@/api/article'
+import { addArticle, deleteArticle, getArticleForEdit, updateArticle } from '@/api/article'
 import { listCategories } from '@/api/category'
 import { uploadImage } from '@/api/user'
 import { formatTime } from '@/utils/format'
+import { useRoute, useRouter } from 'vue-router'
+import { listMyArticles } from '@/api/article'
+import { listAdminArticles, getAdminArticle, updateAdminArticle, deleteAdminArticle } from '@/api/admin'
+import AppIcon from '@/components/AppIcon.vue'
+
+const route = useRoute()
+const router = useRouter()
+const adminView = computed(() => !!route.meta.admin)
 
 // 写接口用数字，列表筛选用中文，两套值不能混
 const STATE_TEXT = { 0: '草稿', 1: '已发布' }
@@ -14,12 +22,13 @@ const STATE_TEXT = { 0: '草稿', 1: '已发布' }
 const loading = ref(false)
 const articles = ref([])
 const total = ref(0)
+let listVersion = 0
 const categories = ref([])
 
 // undefined 表示不筛选（axios 会自动丢掉 undefined 的查询参数，空字符串则会被发出去）
 const query = reactive({
   pageNum: 1,
-  pageSize: 5,
+  pageSize: 10,
   categoryId: undefined,
   state: undefined,
 })
@@ -36,10 +45,10 @@ const form = reactive({
   coverImg: '',
   summary: '',
   categoryId: undefined,
-  state: 1,
+  state: 0,
 })
 
-const dialogTitle = computed(() => (editingId.value ? '编辑文章' : '新增文章'))
+const dialogTitle = computed(() => (editingId.value ? '编辑内容' : '写一篇内容'))
 const categoryNames = computed(() =>
   Object.fromEntries(categories.value.map((item) => [item.id, item.categoryName])),
 )
@@ -71,6 +80,7 @@ function handleCreated(editor) {
 
 // wangeditor 的 Vue 封装只在 onMounted 里建实例、不会自动销毁，漏了这行会内存泄漏
 onBeforeUnmount(() => {
+  listVersion++
   editorRef.value?.destroy()
 })
 
@@ -108,15 +118,19 @@ const rules = {
 }
 
 async function loadArticles() {
+  const current = ++listVersion
   loading.value = true
   try {
-    const res = await listArticles({ ...query })
+    const params = { ...query }
+    if (adminView.value) params.state = query.state === '草稿' ? 0 : query.state === '已发布' ? 1 : undefined
+    const res = await (adminView.value ? listAdminArticles(params) : listMyArticles(params))
+    if (current !== listVersion) return
     total.value = res.data.total
     articles.value = res.data.items
   } catch {
     // 错误提示已由 axios 拦截器统一弹出
   } finally {
-    loading.value = false
+    if (current === listVersion) loading.value = false
   }
 }
 
@@ -159,7 +173,7 @@ async function openDialog(id, row) {
     try {
       // 列表已收窄列不返回正文，编辑前单独取全文（走 /article/edit：不增加浏览量）。
       // 拉取失败就直接不打开弹窗——否则表单里是空正文，保存会把原文覆盖成空
-      full = (await getArticleForEdit(id)).data
+      full = (await (adminView.value ? getAdminArticle(id) : getArticleForEdit(id))).data
     } catch {
       // 错误提示已由 axios 拦截器统一弹出
       return
@@ -181,7 +195,7 @@ async function openDialog(id, row) {
       coverImg: '',
       summary: '',
       categoryId: undefined,
-      state: 1,
+      state: 0,
     })
   }
   dialogVisible.value = true
@@ -222,7 +236,8 @@ async function handleSubmit() {
   try {
     // form 的字段刚好对上两个 DTO；后端 UPDATE 是全字段覆盖，编辑时必须回传完整对象
     if (editingId.value) {
-      await updateArticle({ id: editingId.value, ...form })
+      if (adminView.value) await updateAdminArticle(editingId.value, { ...form })
+      else await updateArticle({ id: editingId.value, ...form })
     } else {
       await addArticle({ ...form })
     }
@@ -244,7 +259,7 @@ async function handleDelete(row) {
   ).catch(() => false)
   if (!confirmed) return
   try {
-    await deleteArticle(row.id)
+    await (adminView.value ? deleteAdminArticle(row.id) : deleteArticle(row.id))
     ElMessage.success('删除成功')
     // 删掉当前页最后一条时往前翻一页，否则会停在一个空页上
     if (articles.value.length === 1 && query.pageNum > 1) {
@@ -256,13 +271,22 @@ async function handleDelete(row) {
   }
 }
 
+async function handleRouteAction() {
+  if (route.query.edit) await openDialog(Number(route.query.edit))
+  else if (route.query.compose === '1') openDialog(null)
+  if (route.query.edit || route.query.compose) await router.replace({ name: route.name })
+}
+watch(() => [route.query.compose, route.query.edit], () => { if (route.query.compose || route.query.edit) handleRouteAction() })
 onMounted(() => {
   loadCategories()
   loadArticles()
+  handleRouteAction()
 })
 </script>
 
 <template>
+  <section class="workspace-page">
+  <header class="page-heading"><div><span class="eyebrow">{{ adminView ? 'COMMUNITY MANAGEMENT' : 'YOUR IDEAS MATTER' }}</span><h1>{{ adminView ? '内容管理' : '我的创作' }}</h1><p>{{ adminView ? '管理全站内容，维护社区的阅读体验。' : '记录实践，分享想法。每一篇内容都是一次新的开始。' }}</p></div><button class="button button-primary" @click="openDialog(null)"><AppIcon name="pen" :size="16" />写一篇内容</button></header>
   <el-card class="glass-card">
     <div class="toolbar">
       <el-select
@@ -284,7 +308,6 @@ onMounted(() => {
       </el-select>
       <el-button type="primary" @click="handleSearch">查询</el-button>
       <el-button @click="handleReset">重置</el-button>
-      <el-button type="success" @click="openDialog(null)">新增文章</el-button>
       <span class="total">共 {{ total }} 篇文章</span>
     </div>
 
@@ -292,7 +315,7 @@ onMounted(() => {
       v-loading="loading"
       :data="articles"
       stripe
-      empty-text="暂无文章，点击「新增文章」创建"
+      empty-text="还没有创作内容，点击「写一篇内容」开始"
     >
       <el-table-column label="封面" width="110">
         <template #default="{ row }">
@@ -416,10 +439,11 @@ onMounted(() => {
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="handleSubmit">确定</el-button>
+        <el-button type="primary" :loading="submitting" @click="handleSubmit">{{ form.state === 0 ? '保存草稿' : '发布内容' }}</el-button>
       </template>
     </el-dialog>
   </el-card>
+  </section>
 </template>
 
 <style scoped>

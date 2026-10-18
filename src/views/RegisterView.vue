@@ -3,6 +3,7 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { register } from '@/api/user'
+import AuthShell from '@/components/AuthShell.vue'
 
 const router = useRouter()
 
@@ -64,18 +65,21 @@ async function handleRegister() {
 </script>
 
 <template>
-  <div class="register-container">
-    <el-card class="register-card">
-      <h2 class="register-title"><span class="title-boom">BOOM！</span>大事件 · 注册</h2>
+  <AuthShell>
+      <span class="eyebrow">YOUR NEXT IDEA STARTS HERE</span>
+      <h2 class="register-title">加入这场好奇心的聚会</h2>
+      <p class="auth-description">创建账号，分享你的第一份发现。</p>
       <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent>
         <el-form-item prop="username">
-          <el-input v-model="form.username" placeholder="用户名（3-20位字母或数字）" size="large" />
+          <el-input v-model="form.username" aria-label="用户名" autocomplete="username" placeholder="用户名（3-20位字母或数字）" size="large" />
         </el-form-item>
         <el-form-item prop="password">
           <el-input
             v-model="form.password"
             type="password"
             placeholder="密码（6-20位）"
+            aria-label="密码"
+            autocomplete="new-password"
             size="large"
             show-password
           />
@@ -85,6 +89,8 @@ async function handleRegister() {
             v-model="form.rePassword"
             type="password"
             placeholder="确认密码"
+            aria-label="确认密码"
+            autocomplete="new-password"
             size="large"
             show-password
             @keyup.enter="handleRegister"
@@ -106,60 +112,7 @@ async function handleRegister() {
         已有账号？
         <router-link to="/login">去登录</router-link>
       </div>
-    </el-card>
-  </div>
+  </AuthShell>
 </template>
 
-<style scoped>
-.register-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  background: transparent;
-}
-
-.register-card {
-  width: 400px;
-  background: var(--glass-bg-strong);
-  backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
-  border: var(--glass-border);
-  border-radius: 18px;
-  box-shadow: 0 16px 48px rgba(43, 52, 64, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.65);
-}
-
-.register-title {
-  margin: 0 0 24px;
-  text-align: center;
-  color: var(--el-text-color-primary);
-}
-
-.title-boom {
-  font-weight: 800;
-  background: linear-gradient(120deg, #4a6fa5, #8fa6c4);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
-
-.register-btn {
-  width: 100%;
-}
-
-.register-footer {
-  text-align: center;
-  font-size: 14px;
-  color: var(--el-text-color-secondary);
-}
-
-/* 不写就是浏览器默认的蓝紫下划线链接，跟主题色完全脱节 */
-.register-footer a {
-  color: var(--el-color-primary);
-  text-decoration: none;
-}
-
-.register-footer a:hover {
-  text-decoration: underline;
-}
-</style>
+<style scoped>.login-btn,.register-btn{width:100%}.login-footer,.register-footer{text-align:center;color:var(--muted)}.login-footer a,.register-footer a{color:var(--brand);text-decoration:none}.login-footer a:hover,.register-footer a:hover{text-decoration:underline}</style>

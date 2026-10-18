@@ -1,59 +1,74 @@
-# BOOM！大事件 · 前端
+# BOOM · 大事件前端
 
-内容社区平台的 **Vue 3 前端**：C 端瀑布流信息流 + B 端管理后台（分类/文章/个人中心）。配套后端仓库：[Wkey999/big-event](https://github.com/Wkey999/big-event)。
+面向 PC Web 的 AI／科技内容社区，基于 Vue 3、Vite、Pinia、Vue Router、Element Plus 与 WangEditor。配套后端：[Wkey999/big-event](https://github.com/Wkey999/big-event)。
 
-## 技术栈
+## 当前初版
 
-Vue 3（Composition API）· Vite · Vue Router · Pinia · axios · Element Plus 2.14.5 · @wangeditor/editor 5
+- 社区首页：顶部导航、频道侧栏、推荐／最新信息流、瀑布流卡片、AI 提问入口。数据来自后端，不在页面写入模拟文章。
+- 阅读页：真实作者、富文本清洗、点赞／收藏与取消、阅读时长和来源上报。
+- 搜索：关键词、频道、发布时间、排序与分页；筛选条件保存在 URL，可刷新或返回。
+- AI 搜索：真实调用 Agent 检索已发布文章，显示回答与后端工具结果生成的引用；每次提问独立检索。预填问题不会自动调用模型。
+- 我的创作：仅自己的文章，草稿／已发布筛选；独立编辑接口预填完整正文，不增加阅读量；新建默认草稿。
+- 管理后台：独立布局，文章管理和频道管理使用 /admin 接口。前端角色守卫和后端权限校验同时生效。
+- 登录、注册、资料设置和 404 页面统一社区视觉。
+- 小游戏频道：/games，点击后按需加载同源合成游戏，支持暂停、继续、退出，以及游戏内返回；离开频道即卸载 iframe。
 
-JavaScript（非 TS），TypeScript 化在路线图上。
-
-## 功能
-
-- **登录 / 注册**：前端校验规则与后端 DTO 逐条对齐（用户名/密码正则、确认密码联动重校验）；路由守卫拦截未登录访问、已登录禁入登录页
-- **主布局**：el-container 侧边栏 + 头部用户下拉，`userInfo` 只在布局层拉取一次
-- **首页信息流**：浏览全站已发布文章，得物式多列瀑布流 + 无限滚动——不依赖任何布局库，封面按确定性宽高比估算列高、贪心放进最矮列，追加不跳位；IntersectionObserver 触底翻页，失败可重试，空态引导发布；卡片作者行用后端列表返回的真实作者
-- **分类管理**：全站频道表格 CRUD + 排序权重 + 即时重名提示（后端为权威）；频道增改删需管理员（`role=1`），普通用户被后端拒绝
-- **文章管理**：分类/状态双筛选 + 分页 + 大弹窗表单；wangeditor 富文本正文、封面与正文插图直传后端 OSS；编辑预填用列表行数据（不打 detail 接口，浏览量不虚增）
-- **个人中心**：基本资料 + 头像上传（保存才落库）+ 修改密码（成功后强制重登）
-
-## 主题层（整站换肤的单一来源）
-
-全部视觉令牌集中在 `src/styles/theme.css`：雾面冷灰蓝配色（主色 `#4A6FA5`）、Element Plus 变量覆盖、玻璃拟态（真 `backdrop-filter` 只给数量恒定的容器，瀑布流卡片用伪玻璃保帧率）、teleport 浮层（dialog/popper/message）的全局规则。改配色只需要动这一个文件。
+当前需要登录后浏览。主界面最小宽度 1100px，暂不设计移动端。评论、向量检索、流式回答和多轮会话不在本次前端初版范围。
 
 ## 本地运行
 
-```bash
-npm install
-npm run dev        # http://localhost:5173
+需要后端已运行于 localhost:8080，MySQL 已启动。前端不保存数据库密码或模型密钥。
+
+```powershell
+# 终端一：后端，使用已有本地忽略配置
+Set-Location D:\workplace\big-event
+mvn.cmd spring-boot:run
+
+# 终端二：前端
+Set-Location D:\workplace\VUE_CODE\big-event-web
+npm.cmd run dev -- --host 127.0.0.1 --strictPort
 ```
 
-**前置条件**：后端跑在 `localhost:8080`。axios `baseURL` 为 `/api`，由 `vite.config.js` 代理并 rewrite 掉 `/api` 前缀转发到后端（后端路由无该前缀），因此无跨域问题，也不需要任何环境变量或密钥。
+浏览器访问 http://127.0.0.1:5173 。Vite 将 /api 代理到后端，移除该前缀。已有 node_modules 时不需要重新安装依赖。
 
-## 目录约定
+## 关键入口
 
-```
-src/
-├── api/          # 一个后端模块一个文件
-├── utils/request.js  # axios 实例：注入 Bearer token；code!==0 统一报错；401 清 token 跳登录
-├── stores/       # Pinia setup store（token 持久化在 localStorage）
-├── router/       # 嵌套路由：/login /register 独立，/ 为布局 + 懒加载子页
-├── styles/theme.css  # 主题层唯一入口
-└── views/ components/
-```
+| 地址 | 用途 |
+| --- | --- |
+| / | 内容发现 |
+| /search?keyword=RAG | 普通检索 |
+| /ask?q=RAG | AI 搜索，预填问题后手动发送 |
+| /games | 小游戏频道 |
+| /read/:id | 阅读详情 |
+| /creator | 我的创作 |
+| /creator?compose=1 | 打开写作表单 |
+| /profile | 个人设置 |
+| /admin/articles | 管理员内容管理 |
+| /admin/categories | 管理员频道管理 |
 
-## 未来规划（任务清单）
+主题入口是 src/styles/community.css，社区和后台布局分别在 src/views/layout/CommunityLayout.vue 与 AdminLayout.vue。旧 LayoutView.vue、theme.css 保留在仓库中供历史比对，当前入口不再引用。信息流加载与曝光逻辑位于 src/composables/useFeed.js。
 
-前端侧：
+## 验证
 
-- [ ] TypeScript 重构（组件、Pinia store、api 层类型化）
-- [ ] C 端公开浏览：免登录只读信息流（当前信息流需登录、已发布内容已全站共享；不依赖任何抓取）
-- [ ] 评论 / 点赞 / 收藏的 C 端交互
-- [ ] 移动端适配与响应式打磨
-- [ ] 构建优化：路由级分包、图片懒加载、Lighthouse 跑分
+2026-10-17 在本机 MySQL 5.7.26 上完成：
 
-多源资讯聚合方向经评估已**搁置**（维护成本与抓取合规风险），见 [后端 README · 未来规划](https://github.com/Wkey999/big-event#未来规划任务清单)；完整功能边界见 [功能实现说明书](https://github.com/Wkey999/big-event/blob/master/docs/%E5%8A%9F%E8%83%BD%E5%AE%9E%E7%8E%B0%E8%AF%B4%E6%98%8E%E4%B9%A6.md)。
+- npm.cmd run build 通过；仍有 Element Plus／编辑器相关的较大分包提示，暂未进行专项体积优化。
+- 配套后端 mvn.cmd -o test：52 项测试通过，0 失败、0 错误。
+- 浏览器实测：登录、首页、文章阅读、点赞和取消、收藏和取消、关键词检索、真实 AI 回答和引用、新建草稿、重新编辑、发布。
+- 接口实测：草稿不进入公开列表、其他账号不能编辑、普通账号管理接口返回 403、发布后出现在本人列表与信息流。
+- 验收新建内容已软删除；已有文章内容未改写。浏览、检索和问答会按正常业务产生行为日志。
+- 一次真实 AI 检索耗时约 4.7 秒，返回 2 篇引用；这是一条联调样本，不作为平均性能指标。
 
-## License
+尚未完整验证管理员身份的写操作和 OSS 文件上传，本轮未修改上传实现。数据库升级、线上部署和论文评测另行安排。
 
-学习项目，仅供个人研究与简历展示。
+## 小游戏静态资源
+
+已接入用户提供的 orbipom-embed.zip（约 29 MB 解压资源），位于 public/games/orbipom/。Vite 构建时原样复制到 dist/games/orbipom/，游戏不进入社区首页 JavaScript 包。源码继续在独立的“网页游戏复刻/orbipom-merge”项目中维护。
+
+iframe 地址为 /games/orbipom/play/game.html?lang=zh-cn，高度 720px、宽度 100%。不注册 Service Worker，不接入社区账号、排行榜或成绩数据库。对局为内存状态，刷新、退出或离开频道后重置。
+
+postMessage 仅接受与当前站点同源、且来源窗口为当前游戏 iframe 的消息。游戏自身发出 orbipom:close 后，宿主页销毁 iframe 并回到开始界面。宿主页的暂停／继续使用游戏包已有的桥接协议。
+
+正式部署时，应让 /games/orbipom/ 走静态文件服务；不存在的文件返回 404，不能回退成社区 index.html。保留 JS、CSS、音频、字体的正确 MIME 类型。资源来源与权利说明见 public/games/orbipom/NOTICE.md。
+
+本机实测：进入频道前无 iframe；点击开始后加载游戏并完成引导、投放；暂停／继续按钮可响应；游戏内返回后 iframe 数量归零。未重新覆盖游戏本体所有技能、结算和输入设备的测试。

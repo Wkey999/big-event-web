@@ -1,460 +1,78 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { actOnArticle, getArticleDetail, listArticles, reportBrowse } from '@/api/article'
 import { listCategories } from '@/api/category'
-import { formatTime } from '@/utils/format'
-import { sanitizeRichText } from '@/utils/sanitizeRichText'
-import FeedCard from '@/components/FeedCard.vue'
-
+import ArticleCard from '@/components/ArticleCard.vue'
+import AppIcon from '@/components/AppIcon.vue'
+import ContentState from '@/components/ContentState.vue'
+import { useFeed } from '@/composables/useFeed'
 const router = useRouter()
-
-const PAGE_SIZE = 8
-const RECOMMEND_PAGE_SIZE = 30
-// 封面宽高比由文章 id 决定：高度在渲染前就可估算，瀑布流分桶不需要量 DOM
-const RATIOS = [3 / 4, 1, 4 / 5]
-
-const items = ref([])
-const total = ref(0)
-const page = ref(1)
-const loading = ref(false)
-const finished = ref(false)
-const loadError = ref(false)
-// 首次加载由 IntersectionObserver 触发，挂载瞬间还没发起；没有这个标记模板会先闪一下空态
-const started = ref(false)
-const feedMode = ref('latest')
-const columnCount = ref(columnCountFor(window.innerWidth))
-const categoryNames = ref(new Map())
-const sentinelEl = ref()
-const preview = ref(null)
-const previewLoading = ref(false)
-
-let sentinelVisible = false
-let io = null
-let resizeTimer = null
-let feedRequestVersion = 0
-// 组件卸载后必须阻断 loadMore 的自链与状态写入：否则离开首页后仍在后台一页页请求
-let unmounted = false
-
-// ---- 行为埋点（阶段 A 数据闭环）----
-// 卡片曝光观察器懒创建：卡片要等第一页数据回来才渲染，放在首次 registerCard 里创建最稳
-let cardObserver = null
-const cardEls = new Map()
-// 一次会话内同一篇文章只报一次曝光，避免来回滚动反复触发
-const reportedExposure = new Set()
-// 预览弹窗停留计时：打开记时间戳，关闭时上报真实时长
-let previewArticleId = null
-let previewEnteredAt = 0
-let previewMode = 'latest'
-
-function sendBrowse(articleId, dwellMs, mode = feedMode.value) {
-  // 埋点不该打扰用户：静默失败（request 拦截器已按 silent 配置跳过提示，这里再兜一层未捕获拒绝）
-  reportBrowse(articleId, dwellMs, mode).catch(() => {})
-}
-
-function handleCardEntries(entries) {
-  for (const entry of entries) {
-    if (!entry.isIntersecting) continue
-    if (Number(entry.target.dataset.feedVersion) !== feedRequestVersion) continue
-    const id = Number(entry.target.dataset.articleId)
-    if (!id || reportedExposure.has(id)) continue
-    reportedExposure.add(id)
-    // 曝光信号：只说明「看到了」，停留时长等关闭预览时再补报
-    sendBrowse(id, 0)
-  }
-}
-
-function registerCard(id, el) {
-  const prev = cardEls.get(id)
-  if (!el) {
-    // 函数式 ref 在卸载时回调 null：显式 unobserve，避免观察器长期持有已移除的节点
-    if (prev) {
-      cardObserver?.unobserve(prev)
-      cardEls.delete(id)
-    }
-    return
-  }
-  cardEls.set(id, el)
-  el.dataset.articleId = String(id)
-  el.dataset.feedVersion = String(feedRequestVersion)
-  if (!cardObserver) {
-    // 露出一半才算曝光；root 同样必须是 .layout-main，否则滚动容器会把相交矩形裁掉
-    cardObserver = new IntersectionObserver(handleCardEntries, {
-      root: el.closest('.layout-main'),
-      threshold: 0.5,
-    })
-  }
-  cardObserver.observe(el)
-}
-
-function flushPreviewDwell() {
-  if (!previewArticleId || !previewEnteredAt) return
-  // 上限与后端 @Max(300000) 对齐，避免挂机过久被校验拒绝
-  const dwellMs = Math.min(Date.now() - previewEnteredAt, 300000)
-  const id = previewArticleId
-  previewArticleId = null
-  previewEnteredAt = 0
-  sendBrowse(id, dwellMs, previewMode)
-}
-
-// ---- 点赞 / 收藏（阶段 A 的高权重信号）----
-const actioning = ref(false)
-
-async function toggleAction(actionType) {
-  const article = preview.value
-  if (!article || actioning.value) return
-  const isOn = actionType === 1 ? article.liked : article.collected
-  actioning.value = true
-  try {
-    await actOnArticle(article.id, actionType, isOn ? 0 : 1)
-    // 后端幂等，这里只做展示层同步（失败会走 catch，状态不变）
-    if (actionType === 1) {
-      article.liked = !isOn
-      article.likeCount = Math.max((article.likeCount ?? 0) + (isOn ? -1 : 1), 0)
-    } else {
-      article.collected = !isOn
-      article.collectCount = Math.max((article.collectCount ?? 0) + (isOn ? -1 : 1), 0)
-    }
-  } catch {
-    // 错误提示已由 axios 拦截器统一弹出
-  } finally {
-    actioning.value = false
-  }
-}
-
-function columnCountFor(width) {
-  if (width >= 1400) return 4
-  if (width >= 900) return 3
-  return 2
-}
-
-const ratioOf = (article) => RATIOS[article.id % RATIOS.length]
-// 100 / ratio 是封面相对列宽的高度，45 是标题两行 + meta 行的经验常量
-const estHeight = (article) => 100 / ratioOf(article) + 45
-
-// 贪心：每张卡放进当前累计高度最小的列。对 items 全量重算，追加时已有卡的归属不变
+const { items, total, mode, categoryId, loading, error, finished, sentinel, stateKey, registerCard, loadMore, reset } = useFeed()
+const categories = ref([])
+const categoryError = ref(false)
+const aiQuestion = ref('')
+const grid = ref(null)
+const columnCount = ref(3)
+let resizeObserver
+const categoryNames = computed(() => Object.fromEntries(categories.value.map(item => [item.id, item.categoryName])))
+const activeCategory = computed(() => categoryNames.value[categoryId.value] || '全部发现')
 const columns = computed(() => {
-  const buckets = Array.from({ length: columnCount.value }, () => ({ list: [], height: 0 }))
-  for (const article of items.value) {
-    const target = buckets.reduce((min, b) => (b.height < min.height ? b : min))
-    target.list.push(article)
-    target.height += estHeight(article)
+  const buckets = Array.from({ length: columnCount.value }, () => ({ height: 0, items: [] }))
+  for (const item of items.value) {
+    const bucket = buckets.reduce((lowest, current) => current.height < lowest.height ? current : lowest)
+    bucket.items.push(item)
+    bucket.height += (item.coverImg ? [150, 190, 135][Number(item.id) % 3] : 190) + 125
   }
-  return buckets.map((b) => b.list)
+  return buckets.map(bucket => bucket.items)
 })
-
-const previewVisible = computed({
-  get: () => preview.value !== null,
-  set: (visible) => {
-    if (!visible) {
-      // 关闭弹窗即用户读完了这一篇：先补报停留时长，再清状态
-      flushPreviewDwell()
-      preview.value = null
-      previewLoading.value = false
-    }
-  },
+async function loadCategories() {
+  categoryError.value = false
+  try { categories.value = (await listCategories()).data }
+  catch { categoryError.value = true }
+}
+function ask(question = aiQuestion.value) {
+  router.push({ name: 'ask', query: question.trim() ? { q: question.trim() } : {} })
+}
+onMounted(() => {
+  loadCategories()
+  resizeObserver = new ResizeObserver(([entry]) => { columnCount.value = entry.contentRect.width >= 900 ? 4 : 3 })
+  if (grid.value) resizeObserver.observe(grid.value)
 })
-
-const sanitizedPreviewContent = computed(() => sanitizeRichText(preview.value?.content))
-
-async function loadMore() {
-  if (loading.value || finished.value) return
-  const requestVersion = feedRequestVersion
-  const requestMode = feedMode.value
-  const pageSize = requestMode === 'recommend' ? RECOMMEND_PAGE_SIZE : PAGE_SIZE
-  loading.value = true
-  started.value = true
-  loadError.value = false
-  try {
-    const res = await listArticles({
-      pageNum: page.value,
-      pageSize,
-      state: '已发布',
-      mode: requestMode,
-    })
-    if (unmounted || requestVersion !== feedRequestVersion) return
-    // 文章管理页可能并发增删导致页码漂移，按 id 去重
-    const seen = new Set(items.value.map((a) => a.id))
-    items.value.push(...res.data.items.filter((a) => !seen.has(a.id)))
-    total.value = res.data.total
-    // 短页判定兜底：本页不满说明已到底。只靠 items.length >= total 时，
-    // 跨页重复被去重掉会让它永远差几条，自链就退化成无限请求（实测症状：一直转圈请求）
-    finished.value = requestMode === 'recommend'
-      || res.data.items.length < pageSize
-      || items.value.length >= total.value
-    page.value += 1
-  } catch {
-    // 错误提示已由 axios 拦截器弹出，这里只负责把哨兵切成重试态
-    if (!unmounted && requestVersion === feedRequestVersion) loadError.value = true
-  } finally {
-    if (!unmounted && requestVersion === feedRequestVersion) loading.value = false
-  }
-  if (unmounted || requestVersion !== feedRequestVersion || requestMode === 'recommend') return
-  // 必须先解除 loading 再自链，否则递归调用会被上面的守卫直接挡回
-  await nextTick()
-  if (sentinelVisible && !finished.value && !loadError.value) loadMore()
-}
-
-function switchFeedMode(nextMode) {
-  if (nextMode !== 'latest' && nextMode !== 'recommend') return
-  if (nextMode === feedMode.value) return
-  // 用旧模式结算当前预览停留，再切换并重新加载，避免错误归因或旧请求串入新信息流。
-  if (preview.value) previewVisible.value = false
-  feedRequestVersion += 1
-  feedMode.value = nextMode
-  items.value = []
-  total.value = 0
-  page.value = 1
-  loading.value = false
-  finished.value = false
-  loadError.value = false
-  started.value = false
-  reportedExposure.clear()
-  nextTick(() => loadMore())
-}
-
-async function openPreview(article) {
-  // 列表已收窄列不含正文，打开预览时才拉全文——这才算一次真实阅读，
-  // 顺便让浏览量增长有意义（此前列表自带 content，没人会调 detail）
-  previewArticleId = article.id
-  previewEnteredAt = Date.now()
-  previewMode = feedMode.value
-  preview.value = { ...article, content: '' }
-  previewLoading.value = true
-  try {
-    const res = await getArticleDetail(article.id)
-    // 用户可能已关掉弹窗或点了另一张卡，回来只认当前这张
-    if (preview.value && preview.value.id === article.id) preview.value = res.data
-  } catch {
-    // 错误提示已由 axios 拦截器统一弹出
-  } finally {
-    previewLoading.value = false
-  }
-}
-
-function handleResize() {
-  clearTimeout(resizeTimer)
-  resizeTimer = setTimeout(() => {
-    columnCount.value = columnCountFor(window.innerWidth)
-  }, 150)
-}
-
-onMounted(async () => {
-  window.addEventListener('resize', handleResize)
-  // root 必须是 .layout-main 这个真正的滚动容器：用 null 时哨兵的相交矩形会被它的
-  // overflow 裁掉，rootMargin 的预加载余量完全失效，矮视口下首屏要等用户滚动才发请求
-  io = new IntersectionObserver(
-    ([entry]) => {
-      // 哨兵持续可见时 IO 不会再次回调，所以记下可见性靠 loadMore 末尾自链补页
-      sentinelVisible = entry.isIntersecting
-      // 失败态必须挡住：加载失败后 el-empty/骨架塌成只剩哨兵，布局变化会再次触发 IO，
-      // 不设防就会自动重发请求（后端真挂了会一直重试），把重试按钮的状态盖掉
-      if (entry.isIntersecting && !loadError.value) loadMore()
-    },
-    { root: sentinelEl.value.closest('.layout-main'), rootMargin: '200px' },
-  )
-  io.observe(sentinelEl.value)
-  try {
-    const res = await listCategories()
-    categoryNames.value = new Map(res.data.map((c) => [c.id, c.categoryName]))
-  } catch {
-    // 分类名拿不到时卡片只是不显示 tag，不阻塞信息流
-  }
-})
-
-onBeforeUnmount(() => {
-  unmounted = true
-  // 离开页面时如果预览还开着，把这段停留也补报掉，否则计时丢失
-  flushPreviewDwell()
-  cardObserver?.disconnect()
-  io?.disconnect()
-  clearTimeout(resizeTimer)
-  window.removeEventListener('resize', handleResize)
-})
+onBeforeUnmount(() => resizeObserver?.disconnect())
 </script>
-
 <template>
-  <div class="feed">
-    <header class="feed-header">
-      <div class="feed-title">
-        <h2>动态</h2>
-        <span v-if="total > 0" class="count">
-          {{ feedMode === 'recommend' ? `本页推荐 ${items.length} 篇` : `共 ${total} 篇` }}
-        </span>
+  <div class="discovery-layout">
+    <aside class="channel-rail">
+      <span class="section-label">内容频道</span>
+      <button :class="{ active: !categoryId }" @click="reset(mode, null)"><AppIcon name="compass" :size="18" />全部发现</button>
+      <button v-for="(category, index) in categories" :key="category.id" :class="{ active: categoryId === category.id }" @click="reset(mode, category.id)"><AppIcon :name="['spark', 'code', 'grid', 'message'][index % 4]" :size="17" />{{ category.categoryName }}</button>
+      <button v-if="categoryError" class="retry-channels" @click="loadCategories">重新加载频道</button>
+      <button @click="router.push({ name: 'games' })"><AppIcon name="game" :size="18" />小游戏</button>
+      <div class="rail-note">记录一点实践，<br>交换一点灵感。</div>
+    </aside>
+    <section class="discovery-content">
+      <header class="discovery-heading"><span class="eyebrow">科技里的新想法，社区里的真实体验</span><h1>发现值得聊的内容<span>。</span></h1></header>
+      <section class="ai-entry">
+        <div class="ai-entry-label"><AppIcon name="spark" :size="17" /><strong>让 AI 帮你找到线索</strong><span>站内内容</span></div>
+        <form @submit.prevent="ask()"><input v-model="aiQuestion" maxlength="200" aria-label="向 AI 提问" placeholder="找几篇适合入门的 Agent 开发实践"><button class="button button-primary" type="submit">问 AI<AppIcon name="external" :size="16" /></button></form>
+      </section>
+      <div class="feed-heading"><div class="feed-tabs" role="group" aria-label="信息流模式"><button :class="{ active: mode === 'recommend' }" :aria-pressed="mode === 'recommend'" @click="mode !== 'recommend' && reset('recommend')">为你推荐</button><button :class="{ active: mode === 'latest' }" :aria-pressed="mode === 'latest'" @click="mode !== 'latest' && reset('latest')">最新分享</button></div><span class="feed-context">{{ categoryId ? activeCategory : '从实践里发现灵感' }}</span></div>
+      <div ref="grid" class="feed-grid">
+        <template v-if="loading && !items.length"><div v-for="i in columnCount" :key="i" class="feed-column"><div class="feed-skeleton"><el-skeleton animated><template #template><el-skeleton-item variant="image" style="width:100%;height:200px" /><el-skeleton-item variant="h3" style="width:80%;margin:18px 12px 12px" /><el-skeleton-item variant="text" style="width:65%;margin:0 12px 18px" /></template></el-skeleton></div></div></template>
+        <template v-else><div v-for="(column, index) in columns" :key="index" class="feed-column"><div v-for="article in column" :key="stateKey + ':' + article.id" :ref="el => registerCard(article.id, el)"><ArticleCard :article="article" :category-name="categoryNames[article.categoryId]" :mode="mode" /></div></div></template>
       </div>
-      <el-radio-group
-        :model-value="feedMode"
-        size="small"
-        aria-label="信息流模式"
-        @update:model-value="switchFeedMode"
-      >
-        <el-radio-button value="recommend">为你推荐</el-radio-button>
-        <el-radio-button value="latest">最新</el-radio-button>
-      </el-radio-group>
-    </header>
-
-    <div v-if="items.length === 0 && !loadError && (loading || !started)" class="feed-columns">
-      <div v-for="c in columnCount" :key="c" class="feed-col">
-        <el-skeleton v-for="n in 2" :key="n" animated class="skeleton-card">
-          <template #template>
-            <el-skeleton-item variant="image" style="width: 100%; height: 200px" />
-            <el-skeleton-item variant="text" style="margin-top: 12px" />
-            <el-skeleton-item variant="text" style="width: 60%; margin-top: 8px" />
-          </template>
-        </el-skeleton>
-      </div>
-    </div>
-
-    <el-empty v-else-if="total === 0 && !loadError" description="还没有已发布的文章">
-      <el-button type="primary" @click="router.push('/article')">去发布</el-button>
-    </el-empty>
-
-    <div v-else class="feed-columns">
-      <div v-for="(col, colIndex) in columns" :key="colIndex" class="feed-col">
-        <!-- 包一层 div 只为拿到可观察的 DOM 节点（组件上的函数式 ref 拿到的是实例不是元素） -->
-        <div
-          v-for="article in col"
-          :key="article.id"
-          :ref="(el) => registerCard(article.id, el)"
-        >
-          <FeedCard
-            :article="article"
-            :category-name="categoryNames.get(article.categoryId) || ''"
-            :author="{ nickname: article.authorNickname, avatar: article.authorAvatar }"
-            :ratio="ratioOf(article)"
-            @click="openPreview(article)"
-          />
-        </div>
-      </div>
-    </div>
-
-    <div ref="sentinelEl" class="sentinel">
-      <span v-if="loadError" class="retry" @click="loadMore">加载失败，点击重试</span>
-      <span v-else-if="loading" class="tip">加载中…</span>
-      <span v-else-if="finished && items.length > 0" class="tip">没有更多了</span>
-    </div>
-
-    <el-dialog v-model="previewVisible" :title="preview?.title" width="720px" top="6vh">
-      <div v-if="preview" class="preview-meta">
-        <span>{{ categoryNames.get(preview.categoryId) || '未分类' }}</span>
-        <span>{{ formatTime(preview.createTime) }}</span>
-        <span>浏览 {{ preview.viewCount }}</span>
-      </div>
-      <!-- 互动状态由 /article/detail 一并返回，按钮无需额外请求 -->
-      <div v-if="preview && !previewLoading" class="preview-actions">
-        <el-button
-          :type="preview.liked ? 'primary' : 'default'"
-          :disabled="actioning"
-          @click="toggleAction(1)"
-        >
-          {{ preview.liked ? '已点赞' : '点赞' }} {{ preview.likeCount ?? 0 }}
-        </el-button>
-        <el-button
-          :type="preview.collected ? 'warning' : 'default'"
-          :disabled="actioning"
-          @click="toggleAction(2)"
-        >
-          {{ preview.collected ? '已收藏' : '收藏' }} {{ preview.collectCount ?? 0 }}
-        </el-button>
-      </div>
-      <!-- 正文来自 /article/detail（打开预览才拉，浏览量 +1） -->
-      <el-skeleton v-if="previewLoading" :rows="6" animated />
-      <!-- 文章正文来自用户输入，渲染前经过 DOMPurify 标签、属性、URI 与样式白名单清洗 -->
-      <div v-else-if="preview" class="preview-content" v-html="sanitizedPreviewContent"></div>
-    </el-dialog>
+      <ContentState v-if="error && !items.length" error title="内容暂时没有加载出来" description="检查连接后再试一次，你的内容还在这里。" @retry="loadMore" />
+      <ContentState v-else-if="!loading && !items.length" title="这里还在等第一份分享" :description="categoryId ? '这个频道暂时没有已发布的内容，可以先看看其他频道。' : '把你的实践和想法写下来，成为社区的第一篇分享。'"><RouterLink class="button button-primary" :to="{ name: 'creator', query: { compose: '1' } }">写一篇内容<AppIcon name="pen" :size="16" /></RouterLink></ContentState>
+      <div ref="sentinel" class="feed-bottom" aria-live="polite"><span v-if="loading && items.length">正在寻找更多内容…</span><button v-else-if="error && items.length" class="text-action" @click="loadMore"><AppIcon name="refresh" :size="16" />加载失败，点击重试</button><span v-else-if="finished && items.length">{{ mode === 'recommend' ? '本次推荐到这里，去「最新分享」继续发现。' : '已经看到这里的全部内容了。' }}</span></div>
+    </section>
+    <aside class="discovery-sidebar">
+      <section class="community-note"><span class="section-label">在 BOOM 分享</span><h2>有用的内容，<br>真实的分享。</h2><p>记录一次开发，聊聊一个工具，或者分享你刚弄懂的问题。</p><RouterLink class="text-action" :to="{ name: 'creator', query: { compose: '1' } }">写下你的那份<AppIcon name="external" :size="15" /></RouterLink></section>
+      <section class="explore-section"><h2>换个角度，继续发现</h2><button @click="ask('有哪些关于 AI Agent 的开发实践？')"><span class="prompt-hash">#</span><span>我的第一个 Agent<small>从一次工具调用开始</small></span></button><button @click="ask('推荐几篇关于开发工具的文章')"><span class="prompt-hash">#</span><span>真正留下的开发工具<small>看看使用之后的取舍</small></span></button><button @click="ask('帮我找几篇开源项目相关的文章')"><span class="prompt-hash">#</span><span>开源项目阅读笔记<small>看懂，然后试着改一点</small></span></button></section>
+      <section class="reading-note"><AppIcon name="bookmark" :size="19" /><h3>读到有用的，记得收藏。</h3><p>在文章里留下一个赞，给认真分享的人一点回应。</p></section>
+      <p class="sidebar-footer">BOOM · 大事件<br>发现灵感，也留下你的那份。</p>
+    </aside>
   </div>
 </template>
-
 <style scoped>
-.feed-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.feed-title {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  min-width: 0;
-}
-
-.feed-header h2 {
-  margin: 0;
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-
-.count {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-}
-
-.feed-columns {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-}
-
-.feed-col {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-/* 与 FeedCard 同配方的伪玻璃，保证骨架态与成型态底色一致不跳变 */
-.skeleton-card {
-  padding: 12px;
-  background: rgba(252, 253, 255, 0.72);
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 14px;
-  box-shadow: 0 2px 12px rgba(43, 52, 64, 0.06);
-}
-
-.sentinel {
-  display: flex;
-  justify-content: center;
-  padding: 24px 0 8px;
-  min-height: 48px;
-}
-
-.tip {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-}
-
-.retry {
-  font-size: 13px;
-  color: var(--el-color-warning);
-  cursor: pointer;
-}
-
-.preview-meta {
-  display: flex;
-  gap: 16px;
-  margin-bottom: 16px;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-}
-
-.preview-actions {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.preview-content :deep(img) {
-  max-width: 100%;
-}
-
-.preview-content :deep(p) {
-  margin: 0 0 12px;
-  line-height: 1.8;
-  color: var(--el-text-color-regular);
-}
+.discovery-layout{display:grid;grid-template-columns:128px minmax(0,1fr) 205px;gap:27px;align-items:start}.channel-rail{position:sticky;top:116px;display:flex;flex-direction:column;gap:8px;padding-top:4px}.channel-rail>.section-label{padding-left:10px;margin-bottom:12px}.channel-rail button{display:flex;align-items:center;gap:9px;border:0;background:none;text-align:left;border-radius:8px;padding:11px 10px;color:var(--muted);font-size:13px}.channel-rail button:hover{background:#eef3e9}.channel-rail button.active{background:var(--soft);color:var(--brand);font-weight:600}.rail-note{margin:65px 0 0 10px;color:var(--muted);font-size:11px;line-height:1.9}.discovery-content{min-width:0}.discovery-heading{margin:0 0 21px}.discovery-heading h1{font-size:30px;font-weight:650;letter-spacing:-1px;line-height:1.4;margin:6px 0 0}.discovery-heading h1 span{color:var(--brand)}.ai-entry{background:var(--soft);border:1px solid #dfe9d7;border-radius:12px;padding:15px 17px}.ai-entry-label{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--brand)}.ai-entry-label strong{font-weight:600}.ai-entry-label>span{margin-left:auto;color:var(--muted);font-size:10px}.ai-entry form{display:flex;align-items:center;background:var(--paper);padding:7px;border-radius:8px;margin-top:10px;gap:8px}.ai-entry input{border:0;background:none;flex:1;min-width:0;padding:5px 7px;font-size:13px;color:var(--ink);outline-offset:3px}.ai-entry .button{padding:8px 12px;font-size:12px}.feed-heading{display:flex;align-items:center;justify-content:space-between;margin:26px 0 19px;gap:12px}.feed-tabs{display:flex;gap:23px}.feed-tabs button{border:0;background:none;padding:0;color:var(--muted);font-size:15px}.feed-tabs button.active{color:var(--ink);font-weight:650}.feed-context{font-size:11px;color:var(--muted)}.feed-grid{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:16px}.feed-column{display:flex;flex-direction:column;gap:17px;min-width:0}.feed-skeleton{overflow:hidden;border:1px solid var(--line);border-radius:12px;background:var(--paper)}.feed-bottom{display:flex;justify-content:center;min-height:54px;align-items:center;color:var(--muted);font-size:12px;margin-top:20px}.discovery-sidebar{padding-top:5px}.community-note{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:20px}.community-note h2{font-size:23px;font-weight:500;line-height:1.5;letter-spacing:-.5px;margin:12px 0}.community-note p{font-size:12px;color:var(--muted);line-height:1.9;margin-bottom:21px}.community-note .text-action{font-size:12px}.explore-section{margin:29px 0}.explore-section h2{font-size:13px;font-weight:600;margin-bottom:12px}.explore-section button{display:flex;align-items:start;gap:8px;padding:12px 0;border:0;background:none;text-align:left;width:100%;font-size:12px}.prompt-hash{display:grid;place-items:center;background:var(--soft);color:var(--brand);width:23px;height:23px;border-radius:5px;flex-shrink:0}.explore-section small{display:block;font-size:10px;margin-top:3px;color:var(--muted)}.reading-note{background:#eeeee2;padding:18px 16px;border-radius:12px}.reading-note>svg{color:#798453}.reading-note h3{font-size:13px;font-weight:500;margin:10px 0 7px}.reading-note p{font-size:11px;color:var(--muted);line-height:1.8;margin:0}.sidebar-footer{font-size:10px;color:var(--muted);line-height:1.9;margin-top:23px}
 </style>

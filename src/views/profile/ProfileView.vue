@@ -142,6 +142,8 @@ async function handleChangePwd() {
 </script>
 
 <template>
+  <section class="workspace-page">
+  <header class="page-heading"><div><span class="eyebrow">YOUR PROFILE</span><h1>个人资料</h1><p>让社区里的朋友更好地认识你。</p></div></header>
   <el-card class="glass-card">
     <el-tabs>
       <el-tab-pane label="基本资料">
@@ -195,6 +197,7 @@ async function handleChangePwd() {
       </el-tab-pane>
     </el-tabs>
   </el-card>
+  </section>
 </template>
 
 <style scoped>
