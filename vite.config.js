@@ -21,7 +21,7 @@ export default defineConfig({
       // 前端请求 /api/user/login → 转发到 http://localhost:8080/user/login
       // 开发期用它解决跨域；rewrite 去掉 /api 前缀，因为后端路径没有这个前缀
       '/api': {
-        target: 'http://localhost:8080',
+        target: process.env.API_PROXY_TARGET || 'http://localhost:8080',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },

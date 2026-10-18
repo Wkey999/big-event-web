@@ -6,15 +6,16 @@ const props = defineProps({ article: { type: Object, required: true }, categoryN
 const failed = ref(false)
 watch(() => props.article.coverImg, () => { failed.value = false })
 const tint = computed(() => Number(props.article.categoryId || props.article.id) % 4)
-const excerpt = computed(() => props.article.summary || '打开文章，看看作者的分享与思考。')
+const title = computed(() => props.article.sourceTranslatedTitle || props.article.sourceTitle || props.article.title)
+const excerpt = computed(() => props.article.sourceName ? `来自${props.article.sourceName}，打开卡片查看原文入口。` : props.article.summary || '打开文章，看看作者的分享与思考。')
 const path = computed(() => ({ name: 'read', params: { id: props.article.id }, query: { mode: props.mode } }))
 </script>
 <template>
   <article class="article-card">
     <RouterLink :to="path" class="card-link">
-      <div v-if="article.coverImg && !failed" class="card-image" :class="`image-shape-${Number(article.id) % 3}`"><img :src="article.coverImg" :alt="article.title" loading="lazy" @error="failed = true"><span v-if="categoryName" class="cover-category">{{ categoryName }}</span></div>
-      <div v-else class="editorial-cover" :class="`tint-${tint}`"><span class="cover-eyebrow">BOOM / {{ categoryName || '社区分享' }}</span><span class="cover-graphic" aria-hidden="true"><i></i><i></i><i></i></span><strong>{{ article.title }}</strong><span class="cover-foot">IDEAS WORTH SHARING</span></div>
-      <div class="card-copy"><span class="card-category">{{ categoryName || '社区分享' }}</span><h2>{{ article.title }}</h2><p>{{ excerpt }}</p></div>
+      <div v-if="article.coverImg && !failed" class="card-image" :class="`image-shape-${Number(article.id) % 3}`"><img :src="article.coverImg" :alt="title" loading="lazy" @error="failed = true"><span v-if="categoryName" class="cover-category">{{ categoryName }}</span></div>
+      <div v-else class="editorial-cover" :class="`tint-${tint}`"><span class="cover-eyebrow">BOOM / {{ categoryName || '社区分享' }}</span><span class="cover-graphic" aria-hidden="true"><i></i><i></i><i></i></span><strong>{{ title }}</strong><span class="cover-foot">IDEAS WORTH SHARING</span></div>
+      <div class="card-copy"><span class="card-category">{{ categoryName || '社区分享' }}<span v-if="article.sourceName"> · 外部链接</span></span><h2>{{ title }}</h2><p>{{ excerpt }}</p></div>
     </RouterLink>
     <div class="card-meta"><span class="card-author"><img v-if="article.authorAvatar" :src="article.authorAvatar" alt="" @error="$event.target.style.display = 'none'"><span v-else class="letter-avatar">{{ (article.authorNickname || '作').slice(0, 1) }}</span><span>{{ article.authorNickname || '社区作者' }}</span></span><span class="card-count" :aria-label="`${article.likeCount || 0} 次点赞`"><AppIcon name="heart" :size="14" />{{ article.likeCount || 0 }}</span></div>
   </article>

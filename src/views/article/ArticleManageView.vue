@@ -345,7 +345,8 @@ onMounted(() => {
       </el-table-column>
       <el-table-column label="操作" width="140" fixed="right">
         <template #default="{ row }">
-          <el-button link type="primary" @click="openDialog(row.id, row)">编辑</el-button>
+          <RouterLink v-if="row.sourceUrl" class="text-action" :to="{name:'read',params:{id:row.id}}">查看来源</RouterLink>
+          <el-button v-else link type="primary" @click="openDialog(row.id, row)">编辑</el-button>
           <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
         </template>
       </el-table-column>

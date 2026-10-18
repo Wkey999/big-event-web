@@ -26,6 +26,7 @@ const router = createRouter({
         { path: '', redirect: '/admin/articles' },
         { path: 'articles', name: 'admin-articles', component: () => import('@/views/article/ArticleManageView.vue') },
         { path: 'categories', name: 'admin-categories', component: () => import('@/views/category/CategoryManageView.vue') },
+        { path: 'feeds', name: 'admin-feeds', component: () => import('@/views/FeedManageView.vue') },
       ],
     },
     { path: '/article', redirect: '/creator' },
