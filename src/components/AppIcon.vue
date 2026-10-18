@@ -21,6 +21,9 @@ const paths = {
   refresh: ['M20 7A9 9 0 1 0 21 15', 'M20 2v5h-5'],
   message: ['M21 15a3 3 0 0 1-3 3H8l-5 4V6a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3Z'],
   close: ['m6 6 12 12', 'M18 6 6 18'],
+  check: ['m5 12 4 4L19 6'],
+  upload: ['M12 16V3', 'm7 8 5-5 5 5', 'M4 16v5h16v-5'],
+  lock: ['M5 10h14v11H5Z', 'M8 10V6a4 4 0 0 1 8 0v4', 'M12 14v3'],
 }
 </script>
 <template><svg :width="size" :height="size" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="app-icon"><path v-for="(path, i) in (paths[name] || paths.arrow)" :key="i" :d="path" /></svg></template>

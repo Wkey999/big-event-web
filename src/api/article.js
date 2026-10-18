@@ -6,7 +6,7 @@ export const listMyArticles = (params) => request.get('/article/mine', { params 
 
 export const searchArticles = (params) => request.get('/article/search', { params })
 
-export const askArticle = (question) => request.post('/article/ask', { question }, { timeout: 60000, silent: true })
+export const askArticle = (question, mode, aiConfig = null) => request.post('/article/ask', { question, mode, aiConfig }, { timeout: 140000, silent: true })
 
 // 列表接口已收窄列，不返回 content（正文 TEXT 不再随卡片列表传输）。
 // 需要正文的两条路径：

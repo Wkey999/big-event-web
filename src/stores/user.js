@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { login as loginApi, getUserInfo as getUserInfoApi } from '@/api/user'
+import { useAiSettingsStore } from '@/stores/aiSettings'
 
 export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('token') || '')
@@ -9,6 +10,7 @@ export const useUserStore = defineStore('user', () => {
   let session = 0
 
   async function login(username, password) {
+    useAiSettingsStore().clear()
     session++
     infoPromise = null
     userInfo.value = null
@@ -34,6 +36,7 @@ export const useUserStore = defineStore('user', () => {
   }
 
   function logout() {
+    useAiSettingsStore().clear()
     session++
     infoPromise = null
     token.value = ''
