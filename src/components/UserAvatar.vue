@@ -1,9 +1,9 @@
 <script setup>
 import { computed } from 'vue'
-import { avatarPresets } from '@/utils/avatars'
+import { getAvatarPortrait } from '@/utils/avatars'
 
 const props = defineProps({ src: String, size: { type: [Number, String], default: 40 }, alt: String })
-const portrait = computed(() => avatarPresets.find(item => item.src === props.src)?.portrait)
+const portrait = computed(() => getAvatarPortrait(props.src))
 const portraitStyle = computed(() => portrait.value ? {
   '--portrait-x': portrait.value.x,
   '--portrait-y': portrait.value.y,

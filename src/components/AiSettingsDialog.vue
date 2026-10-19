@@ -45,10 +45,10 @@ function save() {
     <div class="api-intro"><span>✦</span><div><strong>先免费体验，也可以连接自己的 AI</strong><p>检索社区已发布内容，回答附上可核对的文章引用。</p></div></div>
     <el-radio-group v-model="ai.mode" :disabled="busy" class="mode-picker" aria-label="AI 搜索方式"><el-radio-button value="platform">平台免费体验</el-radio-button><el-radio-button value="custom">使用自己的 API</el-radio-button></el-radio-group>
     <div v-if="ai.mode === 'platform'" class="trial-pane">
-      <template v-if="ai.status"><h3>{{ ai.status.enabled ? `今日剩余 ${ai.status.quota.remaining} / ${ai.status.quota.dailyLimit} 次` : '平台免费体验尚未开放' }}</h3><p v-if="ai.status.enabled">{{ ai.status.provider }} · {{ ai.status.model }}<br>全站今日剩余 {{ ai.status.quota.siteRemaining }} 次，每天北京时间 00:00 重置。</p><p v-else>管理员配置独立试用密钥后开放。你现在可以切换到“使用自己的 API”。</p><p v-if="ai.status.enabled && !ai.trialReady" class="api-error">今日免费额度已用完，可以明天再来或使用自己的 API。</p></template>
+      <template v-if="ai.status"><h3>{{ ai.status.enabled ? `今日剩余 ${ai.status.quota.remaining} / ${ai.status.quota.dailyLimit} 次` : '平台免费体验尚未开放' }}</h3><p v-if="ai.status.enabled">{{ ai.status.provider }} · {{ ai.status.model }}<br>全站今日剩余 {{ ai.status.quota.siteRemaining }} 次。<br>同一网络今日剩余 {{ ai.status.quota.ipRemaining }} / {{ ai.status.quota.ipDailyLimit }} 次，每天北京时间 00:00 重置。</p><p v-else>管理员配置独立试用密钥后开放。你现在可以切换到“使用自己的 API”。</p><p v-if="ai.status.enabled && !ai.trialReady" class="api-error">今日免费额度已用完，可以明天再来或使用自己的 API。</p></template>
       <p v-else>{{ ai.statusError || '正在读取免费额度…' }}</p>
       <button class="text-action" type="button" @click="ai.loadStatus()">刷新额度</button>
-      <div class="api-notice">免费体验由平台承担模型费用。每次开始调用模型扣 1 次，即使调用失败也计入；额度在后端校验，刷新页面不会重置。每次独立提问，不延续历史对话。</div>
+      <div class="api-notice">免费体验由平台承担模型费用。每次开始调用模型扣 1 次，即使调用失败也计入；额度在后端校验，刷新页面不会重置。同一网络下的账号共享网络额度。每次独立提问，不延续历史对话。</div>
     </div>
     <el-form v-else label-position="top" @submit.prevent="save">
       <el-form-item label="AI 服务商"><el-select v-model="draft.provider" aria-label="AI 服务商" :disabled="busy || fetching" @change="changeProvider"><el-option v-for="provider in ai.providers" :key="provider.id" :label="provider.name" :value="provider.id" /></el-select></el-form-item>

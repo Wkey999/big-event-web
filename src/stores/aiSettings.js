@@ -11,7 +11,7 @@ export const useAiSettingsStore = defineStore('ai-settings', () => {
   const mode = ref('platform')
   const status = ref(null)
   const statusError = ref('')
-  const trialReady = computed(() => Boolean(status.value?.enabled && status.value.quota.remaining > 0 && status.value.quota.siteRemaining > 0))
+  const trialReady = computed(() => Boolean(status.value?.enabled && status.value.quota.remaining > 0 && status.value.quota.siteRemaining > 0 && status.value.quota.ipRemaining > 0))
   let providersPromise
   async function loadProviders() {
     if (providers.value.length) return

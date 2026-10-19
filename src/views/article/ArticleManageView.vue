@@ -1,8 +1,8 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Editor, Toolbar } from '@wangeditor/editor-for-vue'
-import '@wangeditor/editor/dist/css/style.css'
+
+
 import { addArticle, deleteArticle, getArticleForEdit, updateArticle } from '@/api/article'
 import { listCategories } from '@/api/category'
 import { uploadImage } from '@/api/user'
@@ -53,51 +53,8 @@ const categoryNames = computed(() =>
   Object.fromEntries(categories.value.map((item) => [item.id, item.categoryName])),
 )
 
-// wangeditor 实例内部状态复杂，被 Vue 深度代理会直接坏掉，必须用 shallowRef
-const editorRef = shallowRef()
-
-const toolbarConfig = { excludeKeys: ['group-video', 'fullScreen'] }
-const editorConfig = {
-  placeholder: '请输入正文…',
-  MENU_CONFIG: {
-    uploadImage: {
-      // 正文插图和封面图共用后端唯一的上传接口，拿到 OSS URL 再插进文档
-      async customUpload(file, insertFn) {
-        try {
-          const res = await uploadImage(file)
-          insertFn(res.data, '', res.data)
-        } catch {
-          // 错误提示已由 axios 拦截器统一弹出
-        }
-      },
-    },
-  },
-}
-
-function handleCreated(editor) {
-  editorRef.value = editor
-}
-
-// wangeditor 的 Vue 封装只在 onMounted 里建实例、不会自动销毁，漏了这行会内存泄漏
-onBeforeUnmount(() => {
-  listVersion++
-  editorRef.value?.destroy()
-})
-
-// 弹窗每次打开都要把当前文章灌进编辑器。setHtml('') 在 wangeditor 里不可靠，清空得用 clear()
-watch(dialogVisible, (visible) => {
-  if (!visible) return
-  nextTick(() => {
-    const editor = editorRef.value
-    // 首次打开时编辑器刚创建，内容已由组件用 modelValue 初始化过，这里拿不到实例直接跳过
-    if (!editor) return
-    if (form.content) {
-      editor.setHtml(form.content)
-    } else {
-      editor.clear()
-    }
-  })
-})
+const ArticleRichEditor = defineAsyncComponent(() => import('@/components/ArticleRichEditor.vue'))
+onBeforeUnmount(() => { listVersion++ })
 
 function validateContent(rule, value, callback) {
   // wangeditor 的空文档是 <p><br></p>，后端 @NotBlank 认为它非空，只能在前端剥掉标签再判
@@ -414,22 +371,7 @@ onMounted(() => {
           </div>
         </el-form-item>
         <el-form-item label="正文" prop="content">
-          <div class="editor">
-            <Toolbar
-              class="editor-toolbar"
-              :editor="editorRef"
-              :default-config="toolbarConfig"
-              mode="default"
-            />
-            <Editor
-              v-model="form.content"
-              class="editor-body"
-              style="height: 300px; overflow-y: hidden"
-              :default-config="editorConfig"
-              mode="default"
-              @on-created="handleCreated"
-            />
-          </div>
+          <ArticleRichEditor v-if="dialogVisible" v-model="form.content" />
         </el-form-item>
         <el-form-item label="状态" prop="state">
           <el-radio-group v-model="form.state">
@@ -507,24 +449,4 @@ onMounted(() => {
   gap: 12px;
 }
 
-/* 这里不能加 overflow:hidden 收圆角：工具栏的下拉面板是编辑器内部绝对定位的，会被裁掉 */
-.editor {
-  width: 100%;
-  border: 1px solid var(--el-border-color);
-  border-radius: 10px;
-  /* 编辑器的下拉菜单要盖住 el-dialog，z-index 必须抬上去 */
-  z-index: 100;
-}
-
-.editor-toolbar {
-  border-bottom: 1px solid var(--el-border-color-light);
-}
-
-.editor :deep(.w-e-toolbar) {
-  border-radius: 9px 9px 0 0;
-}
-
-.editor :deep(.w-e-text-container) {
-  border-radius: 0 0 9px 9px;
-}
 </style>
