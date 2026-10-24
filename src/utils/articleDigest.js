@@ -57,7 +57,76 @@ function detectTopicProfile(article = {}, categoryName = '') {
   const source = String(article.sourceName || '')
   const combined = `${title} ${rawTitle} ${url} ${source} ${categoryName}`.toLowerCase()
 
-  // 1. DeepSeek
+  // 1. 优先识别 LPL / 英雄联盟 S16 全球总决赛焦点战报
+  if (
+    combined.includes('lpl') ||
+    combined.includes('s16') ||
+    combined.includes('英雄联盟') ||
+    combined.includes('全球总决赛') ||
+    combined.includes('瑞士轮') ||
+    /\b(blg|tes)\b/.test(combined) ||
+    combined.includes('faker') ||
+    combined.includes('worlds 2026')
+  ) {
+    return {
+      code: 'WORLDS // S16',
+      headline: 'LPL & Worlds Arena',
+      subline: '英雄联盟全球总决赛战报、瑞士轮对阵与赛场焦点',
+      icon: 'game',
+      themeIndex: 1,
+      tags: ['S16 全球总决赛', 'LPL 焦点战报', '电竞赛场'],
+      topicType: 'esports',
+    }
+  }
+
+  // 2. 识别明确的游戏/电竞与体育资讯来源
+  if (
+    source.toLowerCase().includes('esports') ||
+    source.includes('电竞') ||
+    combined.includes('esportsinsider') ||
+    combined.includes('gcores') ||
+    combined.includes('ign.com') ||
+    categoryName.includes('电竞') ||
+    categoryName.includes('游戏') ||
+    combined.includes('vct') ||
+    combined.includes('valorant') ||
+    combined.includes('无畏契约') ||
+    combined.includes('cs2') ||
+    combined.includes('dota')
+  ) {
+    return {
+      code: 'ESPORTS // ARENA',
+      headline: 'Global Esports Pulse',
+      subline: '全球职业电竞赛场动态、阵容与俱乐部观察',
+      icon: 'game',
+      themeIndex: 3,
+      tags: ['电竞赛事', '职业赛场', '俱乐部动态'],
+      topicType: 'esports',
+    }
+  }
+  if (
+    source.toLowerCase().includes('bbc') ||
+    source.includes('中新体育') ||
+    combined.includes('chinanews.com') ||
+    combined.includes('bbc.co.uk/sport') ||
+    combined.includes('国乒') ||
+    combined.includes('中超') ||
+    combined.includes('nba') ||
+    combined.includes('欧冠') ||
+    categoryName.includes('体育')
+  ) {
+    return {
+      code: 'SPORTS // LIVE',
+      headline: 'Match & Tactical Focus',
+      subline: '国内外焦点赛事动态、战术观察与球员表现',
+      icon: 'compass',
+      themeIndex: 0,
+      tags: ['赛事焦点', '赛场动态', '体育资讯'],
+      topicType: 'sports',
+    }
+  }
+
+  // 2. DeepSeek
   if (combined.includes('deepseek')) {
     return {
       code: 'DEEPSEEK // AI',
