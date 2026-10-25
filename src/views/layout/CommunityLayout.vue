@@ -53,6 +53,10 @@ function command(value) {
             AI 检索
             <span class="small-spark">✦</span>
           </RouterLink>
+          <RouterLink to="/leaderboard" :class="{ active: route.name === 'leaderboard' }">
+            <AppIcon name="chart" :size="15" />
+            AI 榜单
+          </RouterLink>
           <RouterLink to="/games" :class="{ active: route.name === 'games' }">
             <AppIcon name="game" :size="15" />
             休闲局
