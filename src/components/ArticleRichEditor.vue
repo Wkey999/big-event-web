@@ -5,6 +5,7 @@ import '@wangeditor/editor/dist/css/style.css'
 import { uploadImage } from '@/api/user'
 
 const content = defineModel({ type: String, default: '' })
+defineProps({ height: { type: String, default: '300px' } })
 const editorRef = shallowRef()
 const toolbarConfig = { excludeKeys: ['group-video', 'fullScreen'] }
 const editorConfig = {
@@ -26,7 +27,7 @@ onBeforeUnmount(() => editorRef.value?.destroy())
 <template>
   <div class="editor">
     <Toolbar class="editor-toolbar" :editor="editorRef" :default-config="toolbarConfig" mode="default" />
-    <Editor v-model="content" style="height: 300px; overflow-y: hidden" :default-config="editorConfig" mode="default" @on-created="editorRef = $event" />
+    <Editor v-model="content" :style="{ height, overflowY: 'hidden' }" :default-config="editorConfig" mode="default" @on-created="editorRef = $event" />
   </div>
 </template>
 
