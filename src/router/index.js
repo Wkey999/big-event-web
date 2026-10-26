@@ -14,6 +14,7 @@ const router = createRouter({
         { path: '', name: 'home', component: () => import('@/views/HomeView.vue') },
         { path: 'search', name: 'search', component: () => import('@/views/SearchView.vue') },
         { path: 'ask', name: 'ask', component: () => import('@/views/AskView.vue') },
+        { path: 'leaderboard', name: 'leaderboard', component: () => import('@/views/LeaderboardView.vue') },
         { path: 'games', name: 'games', component: () => import('@/views/GamesView.vue') },
         { path: 'read/:id', name: 'read', component: () => import('@/views/ArticleReadView.vue') },
         { path: 'creator', name: 'creator', component: () => import('@/views/article/ArticleManageView.vue') },

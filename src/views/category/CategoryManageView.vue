@@ -105,23 +105,35 @@ onMounted(loadCategories)
 
 <template>
   <section class="workspace-page">
-  <header class="page-heading"><div><span class="eyebrow">COMMUNITY CHANNELS</span><h1>频道管理</h1><p>让内容有清楚的归属，让读者更容易发现。</p></div></header>
-  <el-card class="glass-card">
+  <header class="page-heading">
+    <div>
+      <span class="eyebrow">COMMUNITY CHANNELS · 频道治理</span>
+      <h1>频道管理</h1>
+      <p>让内容有清晰的归属，让读者在社区信息流中更容易发现感兴趣的话题。</p>
+    </div>
+    <button class="button button-primary" @click="openDialog(null)">+ 新增分类</button>
+  </header>
+  <div class="surface category-card">
     <div class="toolbar">
-      <el-button type="primary" @click="openDialog(null)">新增分类</el-button>
-      <el-button :loading="loading" @click="loadCategories">刷新</el-button>
-      <span class="total">共 {{ categories.length }} 个分类</span>
+      <button type="button" class="button button-secondary" :disabled="loading" @click="loadCategories">
+        刷新列表
+      </button>
+      <span class="total">共 <strong>{{ categories.length }}</strong> 个频道分类</span>
     </div>
 
-    <el-table v-loading="loading" :data="categories" stripe empty-text="暂无分类，点击「新增分类」创建">
+    <el-table v-loading="loading" :data="categories" empty-text="暂无分类，点击右上角「新增分类」创建">
       <el-table-column type="index" label="#" width="60" />
-      <el-table-column prop="categoryName" label="分类名称" min-width="160" />
-      <el-table-column prop="sortOrder" label="排序权重" width="110" />
-      <el-table-column label="状态" width="100">
+      <el-table-column prop="categoryName" label="分类名称" min-width="180">
         <template #default="{ row }">
-          <el-tag :type="row.status === 1 ? 'success' : 'info'">
-            {{ row.status === 1 ? '启用' : '禁用' }}
-          </el-tag>
+          <span class="cat-name-pill">{{ row.categoryName }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="sortOrder" label="排序权重" width="120" />
+      <el-table-column label="状态" width="110">
+        <template #default="{ row }">
+          <span class="cat-status" :class="row.status === 1 ? 'on' : 'off'">
+            <i />{{ row.status === 1 ? '启用' : '禁用' }}
+          </span>
         </template>
       </el-table-column>
       <el-table-column label="创建时间" width="180">
@@ -156,11 +168,16 @@ onMounted(loadCategories)
         <el-button type="primary" :loading="submitting" @click="handleSubmit">确定</el-button>
       </template>
     </el-dialog>
-  </el-card>
+  </div>
   </section>
 </template>
 
 <style scoped>
+.category-card {
+  padding: 22px 24px;
+  border-radius: 22px;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -172,22 +189,59 @@ onMounted(loadCategories)
 :deep(.el-table) {
   --el-table-bg-color: #ffffff;
   --el-table-tr-bg-color: #ffffff;
-  --el-table-header-bg-color: var(--el-fill-color-lighter);
-  --el-table-row-hover-bg-color: var(--el-color-primary-light-9);
-  --el-table-border-color: var(--el-border-color-lighter);
+  --el-table-header-bg-color: #f8fafc;
+  --el-table-row-hover-bg-color: rgba(0, 102, 255, 0.035);
+  --el-table-border-color: rgba(15, 23, 42, 0.06);
   background: #ffffff;
-  border-radius: 10px;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.cat-name-pill {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.cat-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.cat-status.on {
+  background: rgba(0, 102, 255, 0.09);
+  color: #0052cc;
+}
+
+.cat-status.off {
+  background: rgba(15, 23, 42, 0.06);
+  color: #64748b;
+}
+
+.cat-status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .total {
   margin-left: auto;
   font-size: 13px;
-  color: var(--el-text-color-secondary);
+  color: var(--muted);
+}
+
+.total strong {
+  color: var(--ink);
 }
 
 .hint {
   margin-left: 12px;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: var(--muted);
 }
 </style>
