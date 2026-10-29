@@ -1,6 +1,6 @@
 // 智能主图海报与内容导读生成引擎：
-// 针对无封面图 (coverImg) 与无摘要 (summary) 的资讯/文章，基于真实标题、来源、URL 路径与分类，
-// 提炼不重复标题的「高定视觉海报主图」参数，以及贴合主题的「站内导读微文章与核心看点总结」。
+// 根据标题、来源、URL 路径与分类生成视觉素材；外链报道只展示可核实的来源信息，
+// 不沿用历史模板摘要或推测报道细节。
 
 const POSTER_THEMES = [
   {
@@ -116,12 +116,12 @@ function detectTopicProfile(article = {}, categoryName = '') {
     categoryName.includes('体育')
   ) {
     return {
-      code: 'SPORTS // LIVE',
-      headline: 'Match & Tactical Focus',
-      subline: '国内外焦点赛事动态、战术观察与球员表现',
+      code: 'SPORTS // NEWS',
+      headline: 'Sports News',
+      subline: '体育新闻、人物报道与赛事动态',
       icon: 'compass',
       themeIndex: 0,
-      tags: ['赛事焦点', '赛场动态', '体育资讯'],
+      tags: ['体育新闻', '人物与赛事', '来源可查'],
       topicType: 'sports',
     }
   }
@@ -277,12 +277,12 @@ function detectTopicProfile(article = {}, categoryName = '') {
     categoryName.includes('体育')
   ) {
     return {
-      code: 'SPORTS // LIVE',
-      headline: 'Match & Tactical Focus',
-      subline: '焦点赛事战报、战术复盘与球员表现速递',
+      code: 'SPORTS // NEWS',
+      headline: 'Sports News',
+      subline: '体育新闻、人物报道与赛事动态',
       icon: 'compass',
       themeIndex: 1,
-      tags: ['赛事焦点', '赛场战报', '战术观察'],
+      tags: ['体育新闻', '人物与赛事', '来源可查'],
       topicType: 'sports',
     }
   }
@@ -318,13 +318,16 @@ export function getVisualPoster(article = {}, categoryName = '') {
 }
 
 export function getSmartSummary(article = {}, categoryName = '') {
-  if (article.summary && article.summary.trim()) {
-    return article.summary.trim()
-  }
   const title = String(
     article.sourceTranslatedTitle || article.title || article.sourceTitle || '',
   ).trim()
   const source = article.sourceName || '社区作者'
+  if (article.sourceUrl) {
+    return `来自 ${source} 的报道：「${title}」。本站展示标题和来源，具体事实请阅读原文。`
+  }
+  if (article.summary && article.summary.trim()) {
+    return article.summary.trim()
+  }
   const profile = detectTopicProfile(article, categoryName)
 
   switch (profile.topicType) {
@@ -358,6 +361,21 @@ export function getStructuredArticleDigest(article = {}, categoryName = '') {
   const author = article.sourceAuthor || article.authorNickname || source
   const profile = detectTopicProfile(article, categoryName)
   const summary = getSmartSummary(article, categoryName)
+
+  if (article.sourceUrl) {
+    return {
+      summary,
+      domainContext: `这是一条来自 ${source} 的外部报道${author && author !== source ? `，原文署名 ${author}` : ''}。本站没有核验或转载全文。`,
+      keyPoints: [
+        `报道主题：${title}。`,
+        '事实与背景：请以原网站的完整报道为准。',
+        '阅读方式：通过下方原文链接查看正文及后续更新。',
+      ],
+      tags: profile.tags,
+      code: profile.code,
+      rawTitle: rawTitle && rawTitle !== title ? rawTitle : '',
+    }
+  }
 
   let domainContext = ''
   let keyPoints = []

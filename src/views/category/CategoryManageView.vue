@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { addCategory, deleteCategory, listCategories, updateCategory } from '@/api/category'
+import { addCategory, deleteCategory, listAdminCategories, updateCategory } from '@/api/category'
 
 const loading = ref(false)
 const categories = ref([])
@@ -39,7 +39,7 @@ const rules = {
 async function loadCategories() {
   loading.value = true
   try {
-    const res = await listCategories()
+    const res = await listAdminCategories()
     categories.value = res.data
   } catch {
     // 错误提示已由 axios 拦截器统一弹出

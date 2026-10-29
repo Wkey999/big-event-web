@@ -8,6 +8,7 @@ const props = defineProps({
   article: { type: Object, required: true },
   categoryName: String,
   mode: { type: String, default: 'latest' },
+  variant: { type: String, default: 'pure' }, // 'pure' (纯净视觉流) | 'text' (深度文字流)
 })
 
 const failed = ref(false)
@@ -18,6 +19,7 @@ watch(
   },
 )
 
+const isTextFlow = computed(() => props.variant === 'text')
 const hasCover = computed(() => Boolean(props.article.coverImg) && !failed.value)
 const isExternal = computed(() => Boolean(props.article.sourceName || props.article.sourceUrl))
 const title = computed(
@@ -32,7 +34,8 @@ const authorDisplay = computed(
 const dateBadge = computed(() => {
   const raw = props.article.publishedAt || props.article.createTime || ''
   if (!raw) return ''
-  return String(raw).replace('T', ' ').slice(5, 16)
+  const formatted = String(raw).replace('T', ' ').slice(5, 16)
+  return isTextFlow.value ? formatted : formatted.slice(0, 5)
 })
 const path = computed(() => ({
   name: 'read',
@@ -44,7 +47,12 @@ const path = computed(() => ({
 <template>
   <article
     class="article-card"
-    :class="{ 'is-media': hasCover, 'is-poster': !hasCover, 'is-external': isExternal }"
+    :class="{
+      'is-media': hasCover,
+      'is-poster': !hasCover,
+      'is-external': isExternal,
+      'is-text-flow': isTextFlow,
+    }"
   >
     <RouterLink :to="path" class="card-link">
       <!-- 形态 A：真实上传的主图封面 -->
@@ -53,22 +61,21 @@ const path = computed(() => ({
         <div class="media-badges">
           <span class="badge-category">{{ categoryName || '社区发现' }}</span>
           <span v-if="isExternal" class="badge-source">
-            {{ article.sourceName || '外部资讯' }}
+            <template v-if="isTextFlow">{{ article.sourceName || '外部资讯' }}</template>
             <AppIcon name="external" :size="11" />
           </span>
         </div>
       </div>
 
-      <!-- 形态 B：智能主题视觉海报主图（不重复下方中文标题，提炼领域视觉与核心看点） -->
+      <!-- 形态 B：智能主题视觉海报主图 -->
       <div
         v-else
         class="poster-cover"
         :class="{ 'is-light': poster.theme.light }"
         :style="{ background: poster.theme.bg, '--poster-accent': poster.theme.accent }"
       >
-        <!-- SVG 科技几何纹理背景 -->
         <svg class="poster-bg-svg" viewBox="0 0 400 220" fill="none" aria-hidden="true">
-          <defs>
+          <defs v-if="isTextFlow">
             <pattern id="poster-grid" width="28" height="28" patternUnits="userSpaceOnUse">
               <path
                 d="M 28 0 L 0 0 0 28"
@@ -79,41 +86,45 @@ const path = computed(() => ({
               />
             </pattern>
           </defs>
-          <rect width="400" height="220" fill="url(#poster-grid)" />
+          <rect v-if="isTextFlow" width="400" height="220" fill="url(#poster-grid)" />
           <circle
-            cx="330"
+            cx="328"
             cy="55"
-            r="76"
+            r="74"
             stroke="currentColor"
-            stroke-opacity="0.18"
-            stroke-width="1.2"
+            stroke-opacity="0.2"
+            stroke-width="1.3"
           />
           <circle
-            cx="330"
+            cx="328"
             cy="55"
-            r="44"
+            r="42"
             stroke="currentColor"
-            stroke-opacity="0.24"
+            stroke-opacity="0.26"
             stroke-dasharray="4 4"
             stroke-width="1.2"
           />
           <path
-            d="M240 190 C280 140, 340 160, 390 105"
+            d="M230 192 C275 138, 338 158, 392 100"
             stroke="currentColor"
-            stroke-opacity="0.26"
-            stroke-width="1.8"
+            stroke-opacity="0.28"
+            stroke-width="1.9"
           />
         </svg>
 
         <div class="poster-top">
           <span class="poster-cat">{{ categoryName || '社区发现' }}</span>
-          <span class="poster-source">
+          <span v-if="isTextFlow" class="poster-source">
             <span class="poster-dot"></span>
             {{ poster.sourceLabel }}
           </span>
+          <span v-else-if="isExternal" class="poster-ext" title="外部资讯源">
+            <AppIcon name="external" :size="12" />
+          </span>
         </div>
 
-        <div class="poster-center">
+        <!-- 文字流海报中心：完整徽标 + 主词 + 副标题 -->
+        <div v-if="isTextFlow" class="poster-center is-detailed">
           <div class="poster-emblem">
             <span class="emblem-icon">
               <AppIcon :name="poster.icon" :size="18" />
@@ -124,23 +135,32 @@ const path = computed(() => ({
           <span class="poster-subline">{{ poster.subline }}</span>
         </div>
 
-        <div class="poster-bottom">
+        <!-- 纯净流海报中心：仅保留图标与核心视觉锚点 -->
+        <div v-else class="poster-center is-clean">
+          <span class="emblem-icon clean-icon">
+            <AppIcon :name="poster.icon" :size="20" />
+          </span>
+          <strong class="poster-headline">{{ poster.highlightToken }}</strong>
+        </div>
+
+        <!-- 文字流底部标签栏 -->
+        <div v-if="isTextFlow" class="poster-bottom">
           <div class="poster-tags">
             <span v-for="tag in poster.tags.slice(0, 3)" :key="tag" class="poster-tag">
               # {{ tag }}
             </span>
           </div>
           <span class="poster-action">
-            精编导读
+            来源速览
             <AppIcon :name="isExternal ? 'external' : 'arrow'" :size="12" />
           </span>
         </div>
       </div>
 
-      <!-- 正文内容区：中文主标题 + 智能微文章总结摘要 -->
+      <!-- 正文内容区：纯净流只展示标题，文字流展示标题 + 内容速览框 -->
       <div class="card-body">
         <h2 class="card-title">{{ title }}</h2>
-        <div class="card-digest-box">
+        <div v-if="isTextFlow" class="card-digest-box">
           <span class="digest-label">内容速览</span>
           <p class="card-excerpt">{{ summaryText }}</p>
         </div>
@@ -254,10 +274,9 @@ const path = computed(() => ({
   border-radius: 999px;
   font-size: 11px;
   font-weight: 700;
-  background: rgba(10, 13, 20, 0.78);
+  background: rgba(10, 13, 20, 0.76);
   backdrop-filter: blur(12px);
   color: #ffffff;
-  letter-spacing: 0.3px;
 }
 
 .badge-source {
@@ -273,17 +292,23 @@ const path = computed(() => ({
   color: var(--ink);
 }
 
-/* 形态 B：智能定制主题视觉海报主图 */
+/* 形态 B：视觉海报主图 */
 .poster-cover {
   position: relative;
-  min-height: 168px;
+  aspect-ratio: 16 / 9.2;
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   overflow: hidden;
   color: #ffffff;
+}
+
+.article-card.is-text-flow .poster-cover {
+  aspect-ratio: auto;
+  min-height: 168px;
+  gap: 10px;
 }
 
 .poster-cover.is-light {
@@ -326,7 +351,7 @@ const path = computed(() => ({
   font-weight: 700;
   background: rgba(255, 255, 255, 0.16);
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.18);
 }
 
 .poster-cover.is-light .poster-cat {
@@ -363,11 +388,26 @@ const path = computed(() => ({
   flex-shrink: 0;
 }
 
-.poster-center {
+.poster-ext {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.poster-center.is-detailed {
   display: flex;
   flex-direction: column;
   gap: 3px;
   margin: 2px 0;
+}
+
+.poster-center.is-clean {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .poster-emblem {
@@ -384,6 +424,13 @@ const path = computed(() => ({
   place-items: center;
   background: rgba(255, 255, 255, 0.16);
   color: var(--poster-accent, #38bdf8);
+  flex-shrink: 0;
+}
+
+.emblem-icon.clean-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
 }
 
 .poster-cover.is-light .emblem-icon {
@@ -400,10 +447,10 @@ const path = computed(() => ({
 }
 
 .poster-headline {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 800;
   letter-spacing: -0.3px;
-  line-height: 1.3;
+  line-height: 1.25;
   display: -webkit-box;
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
@@ -464,7 +511,7 @@ const path = computed(() => ({
 
 /* 正文排版与微文章导读框 */
 .card-body {
-  padding: 15px 17px 13px;
+  padding: 14px 16px 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -472,10 +519,10 @@ const path = computed(() => ({
 }
 
 .card-title {
-  font-size: 16px;
+  font-size: 15.5px;
   line-height: 1.5;
-  font-weight: 800;
-  letter-spacing: -0.25px;
+  font-weight: 750;
+  letter-spacing: -0.2px;
   color: var(--ink);
   margin: 0;
   display: -webkit-box;
@@ -537,7 +584,7 @@ const path = computed(() => ({
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 11px 17px 14px;
+  padding: 10px 16px 13px;
   border-top: 1px solid rgba(15, 23, 42, 0.055);
 }
 
@@ -566,8 +613,8 @@ const path = computed(() => ({
 
 .card-author img,
 .letter-avatar {
-  width: 22px;
-  height: 22px;
+  width: 21px;
+  height: 21px;
   border-radius: 50%;
   object-fit: cover;
   flex-shrink: 0;

@@ -28,10 +28,14 @@ function search() {
   }
 }
 
-function command(value) {
+async function command(value) {
   if (value === 'logout') {
-    user.logout()
-    router.replace('/login')
+    try {
+      await user.logoutRemotely()
+      router.replace('/login')
+    } catch {
+      // The request interceptor displays the error; keep the token if revocation failed.
+    }
     return
   }
   router.push(value)
@@ -56,6 +60,10 @@ function command(value) {
           <RouterLink to="/leaderboard" :class="{ active: route.name === 'leaderboard' }">
             <AppIcon name="chart" :size="15" />
             AI 榜单
+          </RouterLink>
+          <RouterLink to="/documents" :class="{ active: route.name === 'documents' }">
+            <AppIcon name="document" :size="15" />
+            文档助手
           </RouterLink>
           <RouterLink to="/games" :class="{ active: route.name === 'games' }">
             <AppIcon name="game" :size="15" />

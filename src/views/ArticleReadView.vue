@@ -153,7 +153,7 @@ onBeforeUnmount(() => {
             </span>
             <span v-if="article.state === 0" class="tag">草稿 · 仅授权用户可见</span>
           </div>
-          <p v-if="article.summary" class="reading-lede">{{ article.summary }}</p>
+          <p v-if="article.summary && !article.sourceUrl" class="reading-lede">{{ article.summary }}</p>
         </header>
 
         <img

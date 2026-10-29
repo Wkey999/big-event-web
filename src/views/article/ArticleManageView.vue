@@ -2,7 +2,6 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-
 import { addArticle, deleteArticle, getArticleForEdit, updateArticle } from '@/api/article'
 import { listCategories } from '@/api/category'
 import { uploadImage } from '@/api/user'
@@ -45,25 +44,27 @@ const form = reactive({
   coverImg: '',
   summary: '',
   categoryId: undefined,
-  state: 0,
+  state: 1,
 })
 
-const dialogTitle = computed(() => (editingId.value ? '编辑内容' : '写一篇内容'))
-// 编辑器头部的字数 / 阅读时长提示（按中文约 400 字/分钟估算）
+const dialogTitle = computed(() => (editingId.value ? '编辑内容' : '发布内容'))
 const contentLength = computed(() =>
   (form.content || '').replace(/<[^>]+>/g, '').replace(/&nbsp;/gi, ' ').replace(/\s+/g, '').length,
 )
-const readMinutes = computed(() => Math.max(1, Math.ceil(contentLength.value / 400)))
+
 function pickCategory(id) {
   form.categoryId = id
   formRef.value?.validateField('categoryId').catch(() => {})
 }
+
 const categoryNames = computed(() =>
   Object.fromEntries(categories.value.map((item) => [item.id, item.categoryName])),
 )
 
 const ArticleRichEditor = defineAsyncComponent(() => import('@/components/ArticleRichEditor.vue'))
-onBeforeUnmount(() => { listVersion++ })
+onBeforeUnmount(() => {
+  listVersion++
+})
 
 function validateContent(rule, value, callback) {
   // wangeditor 的空文档是 <p><br></p>，后端 @NotBlank 认为它非空，只能在前端剥掉标签再判
@@ -78,9 +79,7 @@ const rules = {
     { max: 50, message: '标题最长50个字符', trigger: 'blur' },
   ],
   content: [{ required: true, validator: validateContent, trigger: 'blur' }],
-  summary: [{ max: 200, message: '摘要最长200个字符', trigger: 'blur' }],
-  categoryId: [{ required: true, message: '请选择文章分类', trigger: 'change' }],
-  state: [{ required: true, message: '请选择文章状态', trigger: 'change' }],
+  categoryId: [{ required: true, message: '请选择所属频道', trigger: 'change' }],
 }
 
 async function loadArticles() {
@@ -133,15 +132,12 @@ function handleSizeChange(size) {
   loadArticles()
 }
 
-async function openDialog(id, row) {
+async function openDialog(id) {
   if (id) {
     let full
     try {
-      // 列表已收窄列不返回正文，编辑前单独取全文（走 /article/edit：不增加浏览量）。
-      // 拉取失败就直接不打开弹窗——否则表单里是空正文，保存会把原文覆盖成空
       full = (await (adminView.value ? getAdminArticle(id) : getArticleForEdit(id))).data
     } catch {
-      // 错误提示已由 axios 拦截器统一弹出
       return
     }
     editingId.value = id
@@ -160,8 +156,8 @@ async function openDialog(id, row) {
       content: '',
       coverImg: '',
       summary: '',
-      categoryId: undefined,
-      state: 0,
+      categoryId: categories.value[0]?.id ?? undefined,
+      state: 1,
     })
   }
   dialogVisible.value = true
@@ -169,7 +165,6 @@ async function openDialog(id, row) {
 }
 
 function beforeCoverUpload(file) {
-  // 后端只认这几个后缀，先在本地拦一道省一次上传
   if (!/\.(jpe?g|png|gif|webp)$/i.test(file.name)) {
     ElMessage.error('只支持 jpg/png/gif/webp 格式的图片')
     return false
@@ -181,13 +176,12 @@ function beforeCoverUpload(file) {
   return true
 }
 
-// 不用 el-upload 默认的 action 上传：那样带不上 Authorization 头，也解不开 Result 包装
 async function customCoverUpload({ file }) {
   coverUploading.value = true
   try {
     const res = await uploadImage(file)
     form.coverImg = res.data
-    ElMessage.success('封面上传成功')
+    ElMessage.success('封面已上传')
   } catch {
     // 错误提示已由 axios 拦截器统一弹出
   } finally {
@@ -195,20 +189,21 @@ async function customCoverUpload({ file }) {
   }
 }
 
-async function handleSubmit() {
+async function handleSubmit(targetState = 1) {
   if (submitting.value) return
+  form.state = targetState
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
   submitting.value = true
   try {
-    // form 的字段刚好对上两个 DTO；后端 UPDATE 是全字段覆盖，编辑时必须回传完整对象
+    const payload = { ...form, state: targetState }
     if (editingId.value) {
-      if (adminView.value) await updateAdminArticle(editingId.value, { ...form })
-      else await updateArticle({ id: editingId.value, ...form })
+      if (adminView.value) await updateAdminArticle(editingId.value, payload)
+      else await updateArticle({ id: editingId.value, ...payload })
     } else {
-      await addArticle({ ...form })
+      await addArticle(payload)
     }
-    ElMessage.success(editingId.value ? '修改成功' : '新增成功')
+    ElMessage.success(targetState === 0 ? '已存入草稿箱' : editingId.value ? '修改已发布' : '发布成功')
     dialogVisible.value = false
     await loadArticles()
   } catch {
@@ -228,7 +223,6 @@ async function handleDelete(row) {
   try {
     await (adminView.value ? deleteAdminArticle(row.id) : deleteArticle(row.id))
     ElMessage.success('删除成功')
-    // 删掉当前页最后一条时往前翻一页，否则会停在一个空页上
     if (articles.value.length === 1 && query.pageNum > 1) {
       query.pageNum -= 1
     }
@@ -243,9 +237,14 @@ async function handleRouteAction() {
   else if (route.query.compose === '1') openDialog(null)
   if (route.query.edit || route.query.compose) await router.replace({ name: route.name })
 }
-watch(() => [route.query.compose, route.query.edit], () => { if (route.query.compose || route.query.edit) handleRouteAction() })
-onMounted(() => {
-  loadCategories()
+watch(
+  () => [route.query.compose, route.query.edit],
+  () => {
+    if (route.query.compose || route.query.edit) handleRouteAction()
+  },
+)
+onMounted(async () => {
+  await loadCategories()
   loadArticles()
   handleRouteAction()
 })
@@ -253,217 +252,179 @@ onMounted(() => {
 
 <template>
   <section class="workspace-page creator-workspace">
-  <header class="page-heading creator-heading">
-    <div>
-      <span class="eyebrow">{{ adminView ? 'COMMUNITY MANAGEMENT · 内容治理' : 'CREATOR STUDIO · 创作中心' }}</span>
-      <h1>{{ adminView ? '内容管理' : '我的创作' }}</h1>
-      <p>{{ adminView ? '管理全站原创文章与资讯卡片，维护社区高质量阅读体验。' : '记录工程实践，分享前沿想法。每一篇内容都是一次新的开始。' }}</p>
-    </div>
-    <button class="button button-electric-cta" @click="openDialog(null)">
-      <AppIcon name="pen" :size="16" />写一篇内容
-    </button>
-  </header>
-  <div class="surface creator-card">
-    <div class="toolbar">
-      <div class="state-pills" role="tablist" aria-label="状态筛选">
-        <button
-          type="button"
-          class="state-pill"
-          :class="{ active: !query.state }"
-          @click="query.state = undefined; handleSearch()"
-        >全部</button>
-        <button
-          type="button"
-          class="state-pill"
-          :class="{ active: query.state === '已发布' }"
-          @click="query.state = '已发布'; handleSearch()"
-        >已发布</button>
-        <button
-          type="button"
-          class="state-pill"
-          :class="{ active: query.state === '草稿' }"
-          @click="query.state = '草稿'; handleSearch()"
-        >草稿箱</button>
+    <header class="page-heading creator-heading">
+      <div>
+        <span class="eyebrow">{{ adminView ? 'COMMUNITY MANAGEMENT · 内容治理' : 'CREATOR STUDIO · 创作中心' }}</span>
+        <h1>{{ adminView ? '内容管理' : '我的创作' }}</h1>
+        <p>{{ adminView ? '管理全站原创文章与资讯卡片，维护社区高质量阅读体验。' : '记录工程实践，分享前沿想法。每一篇内容都是一次新的开始。' }}</p>
       </div>
-      <el-select
-        v-model="query.categoryId"
-        placeholder="全部频道"
-        clearable
-        class="filter-category"
-        @change="handleSearch"
-      >
-        <el-option
-          v-for="item in categories"
-          :key="item.id"
-          :label="item.categoryName"
-          :value="item.id"
-        />
-      </el-select>
-      <button type="button" class="toolbar-btn ghost" @click="handleReset">重置筛选</button>
-      <span class="total">共 <strong>{{ total }}</strong> 篇内容</span>
-    </div>
-
-    <el-table
-      v-loading="loading"
-      :data="articles"
-      empty-text="还没有创作内容，点击右上角「写一篇内容」开始你的第一篇分享"
-    >
-      <el-table-column label="视觉封面" width="118">
-        <template #default="{ row }">
-          <el-image
-            v-if="row.coverImg"
-            :src="row.coverImg"
-            :preview-src-list="[row.coverImg]"
-            preview-teleported
-            fit="cover"
-            class="cover"
+      <button class="button button-electric-cta" @click="openDialog(null)">
+        <AppIcon name="pen" :size="16" />写一篇内容
+      </button>
+    </header>
+    <div class="surface creator-card">
+      <div class="toolbar">
+        <div class="state-pills" role="tablist" aria-label="状态筛选">
+          <button
+            type="button"
+            class="state-pill"
+            :class="{ active: !query.state }"
+            @click="query.state = undefined; handleSearch()"
+          >全部</button>
+          <button
+            type="button"
+            class="state-pill"
+            :class="{ active: query.state === '已发布' }"
+            @click="query.state = '已发布'; handleSearch()"
+          >已发布</button>
+          <button
+            type="button"
+            class="state-pill"
+            :class="{ active: query.state === '草稿' }"
+            @click="query.state = '草稿'; handleSearch()"
+          >草稿箱</button>
+        </div>
+        <el-select
+          v-model="query.categoryId"
+          placeholder="全部频道"
+          clearable
+          class="filter-category"
+          @change="handleSearch"
+        >
+          <el-option
+            v-for="item in categories"
+            :key="item.id"
+            :label="item.categoryName"
+            :value="item.id"
           />
-          <div v-else class="smart-cover-chip">
-            <span>AUTO</span>
-            <small>智能主图</small>
-          </div>
-        </template>
-      </el-table-column>
-      <el-table-column prop="title" label="内容标题" min-width="240" show-overflow-tooltip>
-        <template #default="{ row }">
-          <RouterLink
-            v-if="row.state === 1"
-            class="row-title-link"
-            :to="{ name: 'read', params: { id: row.id } }"
-          >{{ row.title }}</RouterLink>
-          <span v-else class="row-title-draft" @click="openDialog(row.id, row)">{{ row.title }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="所属频道" width="130">
-        <template #default="{ row }">
-          <span class="channel-chip">{{ categoryNames[row.categoryId] || '未分类' }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="状态" width="110">
-        <template #default="{ row }">
-          <span class="status-badge" :class="row.state === 1 ? 'is-live' : 'is-draft'">
-            <i class="status-dot" />{{ STATE_TEXT[row.state] }}
-          </span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="viewCount" label="阅读量" width="95">
-        <template #default="{ row }">
-          <span class="views-num">{{ row.viewCount ?? 0 }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="创建时间" width="175">
-        <template #default="{ row }">
-          <span class="time-cell">{{ formatTime(row.createTime) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="150" fixed="right">
-        <template #default="{ row }">
-          <RouterLink v-if="row.sourceUrl" class="text-action" :to="{name:'read',params:{id:row.id}}">查看来源</RouterLink>
-          <el-button v-else link type="primary" @click="openDialog(row.id, row)">编辑</el-button>
-          <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+        </el-select>
+        <button type="button" class="toolbar-btn ghost" @click="handleReset">重置筛选</button>
+        <span class="total">共 <strong>{{ total }}</strong> 篇内容</span>
+      </div>
 
-    <el-pagination
-      class="pager"
-      background
-      layout="total, sizes, prev, pager, next, jumper"
-      :total="total"
-      :current-page="query.pageNum"
-      :page-size="query.pageSize"
-      :page-sizes="[5, 10, 20]"
-      @current-change="handlePageChange"
-      @size-change="handleSizeChange"
-    />
+      <el-table
+        v-loading="loading"
+        :data="articles"
+        empty-text="还没有创作内容，点击右上角「写一篇内容」开始你的第一篇分享"
+      >
+        <el-table-column label="视觉封面" width="118">
+          <template #default="{ row }">
+            <el-image
+              v-if="row.coverImg"
+              :src="row.coverImg"
+              :preview-src-list="[row.coverImg]"
+              preview-teleported
+              fit="cover"
+              class="cover"
+            />
+            <div v-else class="smart-cover-chip">
+              <span>AUTO</span>
+              <small>智能主图</small>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column prop="title" label="内容标题" min-width="240" show-overflow-tooltip>
+          <template #default="{ row }">
+            <RouterLink
+              v-if="row.state === 1"
+              class="row-title-link"
+              :to="{ name: 'read', params: { id: row.id } }"
+            >{{ row.title }}</RouterLink>
+            <span v-else class="row-title-draft" @click="openDialog(row.id, row)">{{ row.title }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="所属频道" width="130">
+          <template #default="{ row }">
+            <span class="channel-chip">{{ categoryNames[row.categoryId] || '未分类' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <span class="status-badge" :class="row.state === 1 ? 'is-live' : 'is-draft'">
+              <i class="status-dot" />{{ STATE_TEXT[row.state] }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="viewCount" label="阅读量" width="95">
+          <template #default="{ row }">
+            <span class="views-num">{{ row.viewCount ?? 0 }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="175">
+          <template #default="{ row }">
+            <span class="time-cell">{{ formatTime(row.createTime) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="150" fixed="right">
+          <template #default="{ row }">
+            <RouterLink v-if="row.sourceUrl" class="text-action" :to="{ name: 'read', params: { id: row.id } }">查看来源</RouterLink>
+            <el-button v-else link type="primary" @click="openDialog(row.id, row)">编辑</el-button>
+            <el-button link type="danger" @click="handleDelete(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
 
-    <el-dialog
-      v-model="dialogVisible"
-      width="1120px"
-      top="4vh"
-      class="composer-dialog"
-      modal-class="composer-overlay"
-      :show-close="false"
-      :close-on-click-modal="false"
-      append-to-body
-    >
-      <template #header>
-        <div class="composer-head">
-          <div class="composer-head-left">
-            <span class="composer-dot" :class="{ live: form.state === 1 }" />
-            <div>
-              <span class="composer-kicker">{{ editingId ? 'EDITING' : 'NEW STORY' }}</span>
-              <h2>{{ dialogTitle }}</h2>
+      <el-pagination
+        class="pager"
+        background
+        layout="total, sizes, prev, pager, next, jumper"
+        :total="total"
+        :current-page="query.pageNum"
+        :page-size="query.pageSize"
+        :page-sizes="[5, 10, 20]"
+        @current-change="handlePageChange"
+        @size-change="handleSizeChange"
+      />
+
+      <!-- 极简沉浸式单栏发布弹窗 -->
+      <el-dialog
+        v-model="dialogVisible"
+        width="820px"
+        top="5vh"
+        class="composer-dialog"
+        modal-class="composer-overlay"
+        :show-close="false"
+        :close-on-click-modal="false"
+        append-to-body
+      >
+        <template #header>
+          <div class="composer-head">
+            <h2>{{ dialogTitle }}</h2>
+            <div class="composer-head-right">
+              <span v-if="contentLength > 0" class="composer-meta">{{ contentLength }} 字</span>
+              <button type="button" class="composer-close" aria-label="关闭" @click="dialogVisible = false">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
             </div>
           </div>
-          <div class="composer-head-right">
-            <span class="composer-meta">{{ contentLength }} 字 · 约 {{ readMinutes }} 分钟读完</span>
-            <button type="button" class="composer-close" aria-label="关闭" @click="dialogVisible = false">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-            </button>
-          </div>
-        </div>
-      </template>
+        </template>
 
-      <el-form ref="formRef" :model="form" :rules="rules" class="composer-form" @submit.prevent @keydown.ctrl.enter="handleSubmit" @keydown.meta.enter="handleSubmit">
-        <div class="composer-grid">
-          <!-- 左：写作区 -->
-          <main class="composer-main">
+        <el-form
+          ref="formRef"
+          :model="form"
+          :rules="rules"
+          class="composer-form"
+          @submit.prevent
+          @keydown.ctrl.enter="handleSubmit(1)"
+          @keydown.meta.enter="handleSubmit(1)"
+        >
+          <div class="composer-body">
+            <!-- 1. 标题 -->
             <el-form-item prop="title" class="title-item">
               <el-input
                 v-model="form.title"
                 maxlength="50"
                 show-word-limit
-                placeholder="给你的内容起个好标题…"
+                placeholder="输入文章标题…"
                 class="title-input"
               />
             </el-form-item>
-            <el-form-item prop="summary" class="summary-item">
-              <el-input
-                v-model="form.summary"
-                type="textarea"
-                :autosize="{ minRows: 1, maxRows: 3 }"
-                maxlength="200"
-                show-word-limit
-                placeholder="一句话导语（选填，展示在信息流卡片上）"
-                class="summary-input"
-              />
-            </el-form-item>
-            <el-form-item prop="content" class="content-item">
-              <ArticleRichEditor v-if="dialogVisible" v-model="form.content" height="44vh" class="composer-editor" />
-            </el-form-item>
-          </main>
 
-          <!-- 右：发布设置 -->
-          <aside class="composer-side">
-            <section class="side-block">
-              <h3>封面</h3>
-              <el-upload
-                class="cover-drop"
-                :show-file-list="false"
-                :before-upload="beforeCoverUpload"
-                :http-request="customCoverUpload"
-                accept="image/*"
-                drag
-              >
-                <div v-if="form.coverImg" class="cover-preview">
-                  <img :src="form.coverImg" alt="封面预览" />
-                  <div class="cover-mask">点击或拖拽更换</div>
-                </div>
-                <div v-else v-loading="coverUploading" class="cover-empty">
-                  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4" /><circle cx="9" cy="9" r="1.8" /><path d="M21 15l-5-5L5 21" /></svg>
-                  <strong>上传封面</strong>
-                  <span>拖拽或点击 · JPG / PNG / GIF / WEBP · ≤ 2MB</span>
-                </div>
-              </el-upload>
-              <button v-if="form.coverImg" type="button" class="side-link danger" @click="form.coverImg = ''">移除封面</button>
-              <p v-else class="side-hint">不上传也没关系，系统会自动生成主题视觉主图。</p>
-            </section>
-
-            <section class="side-block">
-              <h3>频道 <em>*</em></h3>
+            <!-- 2. 紧凑工具条：所属频道 + 可选封面 -->
+            <div class="composer-meta-row">
               <el-form-item prop="categoryId" class="chip-item">
                 <div class="chip-group" role="radiogroup" aria-label="选择频道">
+                  <span class="meta-label">频道</span>
                   <button
                     v-for="item in categories"
                     :key="item.id"
@@ -474,43 +435,55 @@ onMounted(() => {
                     :class="{ active: form.categoryId === item.id }"
                     @click="pickCategory(item.id)"
                   >{{ item.categoryName }}</button>
-                  <span v-if="!categories.length" class="side-hint">暂无可用频道</span>
                 </div>
               </el-form-item>
-            </section>
 
-            <section class="side-block">
-              <h3>可见性</h3>
-              <el-form-item prop="state" class="chip-item">
-                <div class="segmented" role="radiogroup" aria-label="发布状态">
-                  <button type="button" role="radio" :aria-checked="form.state === 0" :class="{ active: form.state === 0 }" @click="form.state = 0">
-                    <span class="seg-dot" />草稿
+              <div class="cover-inline">
+                <el-upload
+                  :show-file-list="false"
+                  :before-upload="beforeCoverUpload"
+                  :http-request="customCoverUpload"
+                  accept="image/*"
+                >
+                  <button type="button" class="cover-pill-btn" :disabled="coverUploading">
+                    <img v-if="form.coverImg" :src="form.coverImg" alt="" class="cover-mini-thumb" />
+                    <AppIcon v-else name="upload" :size="14" />
+                    <span>{{ coverUploading ? '上传中…' : form.coverImg ? '更换封面' : '添加封面（可选）' }}</span>
                   </button>
-                  <button type="button" role="radio" :aria-checked="form.state === 1" :class="{ active: form.state === 1 }" @click="form.state = 1">
-                    <span class="seg-dot live" />公开发布
-                  </button>
-                </div>
-              </el-form-item>
-              <p class="side-hint">{{ form.state === 1 ? '发布后将出现在社区首页与频道信息流。' : '草稿仅自己可见，可随时继续编辑。' }}</p>
-            </section>
-          </aside>
-        </div>
-      </el-form>
+                </el-upload>
+                <button
+                  v-if="form.coverImg"
+                  type="button"
+                  class="cover-remove-btn"
+                  title="移除封面"
+                  @click="form.coverImg = ''"
+                >×</button>
+              </div>
+            </div>
 
-      <template #footer>
-        <div class="composer-foot">
-          <span class="foot-tip"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> 快速{{ form.state === 0 ? '保存' : '发布' }}</span>
-          <div class="foot-actions">
-            <button type="button" class="btn-ghost" @click="dialogVisible = false">取消</button>
-            <button type="button" class="btn-solid" :class="{ live: form.state === 1 }" :disabled="submitting" @click="handleSubmit">
-              <span v-if="submitting" class="btn-spinner" />
-              {{ form.state === 0 ? '保存草稿' : '发布内容' }}
-            </button>
+            <!-- 3. 精简正文编辑器 -->
+            <el-form-item prop="content" class="content-item">
+              <ArticleRichEditor v-if="dialogVisible" v-model="form.content" height="44vh" class="composer-editor" />
+            </el-form-item>
           </div>
-        </div>
-      </template>
-    </el-dialog>
-  </div>
+        </el-form>
+
+        <template #footer>
+          <div class="composer-foot">
+            <span class="foot-tip">未传封面时系统自动生成主题主图 · <kbd>Ctrl</kbd> + <kbd>Enter</kbd> 直接发布</span>
+            <div class="foot-actions">
+              <button type="button" class="btn-ghost" :disabled="submitting" @click="handleSubmit(0)">
+                存为草稿
+              </button>
+              <button type="button" class="btn-solid live" :disabled="submitting" @click="handleSubmit(1)">
+                <span v-if="submitting" class="btn-spinner" />
+                立即发布
+              </button>
+            </div>
+          </div>
+        </template>
+      </el-dialog>
+    </div>
   </section>
 </template>
 
@@ -593,7 +566,6 @@ onMounted(() => {
   color: var(--brand);
 }
 
-/* 玻璃卡内的表格强制纯白：backdrop-filter 祖先 + sticky 表头/固定列在 Safari 有已知冲突，透底会花 */
 :deep(.el-table) {
   --el-table-bg-color: #ffffff;
   --el-table-tr-bg-color: #ffffff;
@@ -726,15 +698,13 @@ onMounted(() => {
   font-size: 12px;
   color: var(--muted);
 }
-
 </style>
 
-<!-- 弹窗 append-to-body 到 body 下，scoped 样式够不到，统一用 .composer-dialog 前缀做全局作用域 -->
 <style>
 .composer-overlay {
   background: rgba(10, 13, 20, 0.42);
-  backdrop-filter: blur(10px) saturate(140%);
-  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
 }
 
 .composer-dialog.el-dialog {
@@ -744,83 +714,41 @@ onMounted(() => {
   --c-brand: #0066ff;
   max-width: calc(100vw - 32px);
   padding: 0;
-  border-radius: 24px;
+  border-radius: 22px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(22px) saturate(185%);
-  -webkit-backdrop-filter: blur(22px) saturate(185%);
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  box-shadow: 0 40px 90px -30px rgba(10, 13, 20, 0.45), 0 0 0 1px rgba(15, 23, 42, 0.04);
-  animation: composer-in 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 32px 80px -24px rgba(10, 13, 20, 0.4);
 }
 
-@keyframes composer-in {
-  from { opacity: 0; transform: translateY(14px) scale(0.985); }
-  to { opacity: 1; transform: none; }
-}
-
-.composer-dialog .el-dialog__header {
+.composer-dialog .el-dialog__header,
+.composer-dialog .el-dialog__body,
+.composer-dialog .el-dialog__footer {
   padding: 0;
   margin: 0;
 }
 
-.composer-dialog .el-dialog__body {
-  padding: 0;
-}
-
-.composer-dialog .el-dialog__footer {
-  padding: 0;
-}
-
-/* ---------- 头部 ---------- */
+/* 顶栏 */
 .composer-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 18px 24px;
+  padding: 15px 24px;
   border-bottom: 1px solid var(--c-line);
 }
 
-.composer-head-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.composer-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #cbd5e1;
-  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.18);
-  transition: all 0.25s ease;
-}
-
-.composer-dot.live {
-  background: var(--c-brand);
-  box-shadow: 0 0 0 4px rgba(0, 102, 255, 0.18);
-}
-
-.composer-kicker {
-  display: block;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  color: var(--c-muted);
-}
-
 .composer-head h2 {
-  margin: 1px 0 0;
-  font-size: 17px;
-  font-weight: 700;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 750;
   color: var(--c-ink);
 }
 
 .composer-head-right {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .composer-meta {
@@ -832,55 +760,30 @@ onMounted(() => {
 .composer-close {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   border: 0;
   border-radius: 50%;
   background: rgba(15, 23, 42, 0.05);
   color: var(--c-muted);
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: all 0.16s ease;
 }
 
 .composer-close:hover {
   background: var(--c-ink);
   color: #fff;
-  transform: rotate(90deg);
 }
 
-/* ---------- 主体布局 ---------- */
-.composer-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  min-height: 0;
-}
-
-.composer-main {
-  padding: 22px 28px 8px;
-  min-width: 0;
-}
-
-.composer-side {
-  padding: 22px 22px 8px;
-  border-left: 1px solid var(--c-line);
-  background: linear-gradient(180deg, rgba(242, 244, 248, 0.7), rgba(242, 244, 248, 0.35));
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
-  max-height: 72vh;
-  overflow-y: auto;
+/* 单栏主体 */
+.composer-body {
+  padding: 18px 24px 8px;
 }
 
 .composer-form .el-form-item {
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
-.composer-form .el-form-item__error {
-  padding-top: 4px;
-  font-size: 12px;
-}
-
-/* 标题：无边框大字号 */
 .title-input .el-input__wrapper {
   padding: 0 2px;
   background: transparent;
@@ -888,15 +791,15 @@ onMounted(() => {
 }
 
 .title-input .el-input__inner {
-  height: 52px;
-  font-size: 28px;
+  height: 46px;
+  font-size: 24px;
   font-weight: 750;
   letter-spacing: -0.01em;
   color: var(--c-ink);
 }
 
 .title-input .el-input__inner::placeholder {
-  color: #c4cad4;
+  color: #c0c7d2;
   font-weight: 700;
 }
 
@@ -906,217 +809,50 @@ onMounted(() => {
   color: #94a3b8;
 }
 
-.title-item.is-error .title-input .el-input__inner {
-  caret-color: #ef4444;
-}
-
 .title-item {
   border-bottom: 1px solid var(--c-line);
-  padding-bottom: 6px;
+  padding-bottom: 4px;
 }
 
-.title-item.is-error {
-  border-bottom-color: rgba(239, 68, 68, 0.5);
-}
-
-/* 导语 */
-.summary-input .el-textarea__inner {
-  padding: 4px 2px;
-  border: 0;
-  box-shadow: none !important;
-  background: transparent;
-  resize: none;
-  font-size: 15px;
-  line-height: 1.7;
-  color: #334155;
-}
-
-.summary-input .el-textarea__inner::placeholder {
-  color: #a3acb9;
-}
-
-.summary-input .el-input__count {
-  background: transparent;
-  color: #94a3b8;
-}
-
-/* 编辑器 */
-.content-item .el-form-item__content {
-  display: block;
-}
-
-.composer-editor.editor {
-  border: 1px solid var(--c-line);
-  border-radius: 16px;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-  overflow: hidden;
-}
-
-.composer-editor.editor:focus-within {
-  border-color: rgba(0, 102, 255, 0.45);
-  box-shadow: 0 0 0 4px rgba(0, 102, 255, 0.08);
-}
-
-.composer-editor .w-e-toolbar {
-  padding: 4px 8px;
-  background: rgba(248, 250, 252, 0.9);
-  border-bottom: 1px solid var(--c-line);
-}
-
-.composer-editor .w-e-bar-item button {
-  border-radius: 8px;
-}
-
-.composer-editor .w-e-bar-item button:hover {
-  background: rgba(0, 102, 255, 0.08);
-}
-
-.composer-editor .w-e-text-container [data-slate-editor] {
-  padding: 4px 18px;
-  font-size: 15px;
-  line-height: 1.85;
-  color: #1e293b;
-}
-
-.composer-editor .w-e-text-placeholder {
-  left: 18px;
-  font-style: normal;
-  color: #a3acb9;
-}
-
-.content-item.is-error .composer-editor.editor {
-  border-color: rgba(239, 68, 68, 0.5);
-}
-
-/* ---------- 侧栏 ---------- */
-.side-block h3 {
-  margin: 0 0 10px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--c-ink);
-}
-
-.side-block h3 em {
-  font-style: normal;
-  color: #ef4444;
-}
-
-.side-hint {
-  margin: 8px 0 0;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--c-muted);
-}
-
-.side-link {
-  margin-top: 8px;
-  padding: 0;
-  border: 0;
-  background: none;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.side-link.danger {
-  color: #ef4444;
-}
-
-/* 封面拖拽区 */
-.cover-drop,
-.cover-drop .el-upload {
-  display: block;
-  width: 100%;
-}
-
-.cover-drop .el-upload-dragger {
-  padding: 0;
-  border: 1.5px dashed rgba(15, 23, 42, 0.14);
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.8);
-  overflow: hidden;
-  transition: all 0.2s ease;
-}
-
-.cover-drop .el-upload-dragger:hover,
-.cover-drop .el-upload-dragger.is-dragover {
-  border-color: var(--c-brand);
-  background: rgba(0, 102, 255, 0.04);
-}
-
-.cover-empty {
+/* 频道与封面单行工具条 */
+.composer-meta-row {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  aspect-ratio: 16 / 9;
-  justify-content: center;
-  color: #94a3b8;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-.cover-empty strong {
-  font-size: 13px;
-  color: var(--c-ink);
-}
-
-.cover-empty span {
-  font-size: 11px;
-}
-
-.cover-preview {
-  position: relative;
-  aspect-ratio: 16 / 9;
-}
-
-.cover-preview img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.cover-mask {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: rgba(10, 13, 20, 0.45);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-
-.cover-preview:hover .cover-mask {
-  opacity: 1;
-}
-
-/* 频道 chip */
 .chip-item {
   margin-bottom: 0 !important;
 }
 
 .chip-group {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 7px;
+}
+
+.meta-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--c-muted);
+  margin-right: 4px;
 }
 
 .chip {
-  padding: 7px 14px;
+  padding: 6px 13px;
   border: 1px solid rgba(15, 23, 42, 0.1);
   border-radius: 999px;
   background: #fff;
   color: #334155;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: 12.5px;
+  font-weight: 600;
   line-height: 1;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: all 0.16s ease;
 }
 
 .chip:hover {
@@ -1128,61 +864,99 @@ onMounted(() => {
   background: var(--c-ink);
   border-color: var(--c-ink);
   color: #fff;
-  box-shadow: 0 6px 14px -6px rgba(10, 13, 20, 0.45);
 }
 
-/* 草稿 / 发布 分段控件 */
-.segmented {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  width: 100%;
-  padding: 4px;
-  border-radius: 14px;
-  background: rgba(15, 23, 42, 0.06);
+.cover-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.segmented button {
+.cover-pill-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 7px;
-  padding: 9px 0;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--c-muted);
-  font-size: 13px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px dashed rgba(15, 23, 42, 0.18);
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.16s ease;
 }
 
-.segmented button.active {
-  background: #fff;
-  color: var(--c-ink);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.1);
+.cover-pill-btn:hover:not(:disabled) {
+  border-color: var(--c-brand);
+  color: var(--c-brand);
+  background: #f0f7ff;
 }
 
-.seg-dot {
-  width: 7px;
-  height: 7px;
+.cover-mini-thumb {
+  width: 22px;
+  height: 16px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.cover-remove-btn {
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  background: #94a3b8;
+  border: 0;
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
 }
 
-.seg-dot.live {
-  background: var(--c-brand);
+/* 编辑器 */
+.content-item .el-form-item__content {
+  display: block;
 }
 
-/* ---------- 底栏 ---------- */
+.composer-editor.editor {
+  border: 1px solid var(--c-line);
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.composer-editor.editor:focus-within {
+  border-color: rgba(0, 102, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.08);
+}
+
+.composer-editor .w-e-toolbar {
+  padding: 4px 8px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--c-line);
+}
+
+.composer-editor .w-e-text-container [data-slate-editor] {
+  padding: 6px 16px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: #1e293b;
+}
+
+.composer-editor .w-e-text-placeholder {
+  left: 16px;
+  font-style: normal;
+  color: #a3acb9;
+}
+
+/* 底栏 */
 .composer-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 24px;
+  padding: 13px 24px;
   border-top: 1px solid var(--c-line);
-  background: rgba(255, 255, 255, 0.7);
+  background: #fafbfd;
 }
 
 .foot-tip {
@@ -1192,10 +966,9 @@ onMounted(() => {
 
 .foot-tip kbd {
   display: inline-block;
-  padding: 1px 6px;
+  padding: 1px 5px;
   border: 1px solid rgba(15, 23, 42, 0.12);
-  border-bottom-width: 2px;
-  border-radius: 6px;
+  border-radius: 5px;
   background: #fff;
   font-family: inherit;
   font-size: 11px;
@@ -1212,50 +985,46 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 40px;
-  padding: 0 20px;
+  height: 38px;
+  padding: 0 18px;
   border-radius: 999px;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 13.5px;
+  font-weight: 650;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: all 0.18s ease;
 }
 
 .btn-ghost {
-  border: 1px solid rgba(15, 23, 42, 0.1);
+  border: 1px solid rgba(15, 23, 42, 0.12);
   background: #fff;
   color: #334155;
 }
 
-.btn-ghost:hover {
-  border-color: rgba(15, 23, 42, 0.25);
+.btn-ghost:hover:not(:disabled) {
+  border-color: var(--c-ink);
   color: var(--c-ink);
 }
 
-.btn-solid {
-  border: 0;
-  background: var(--c-ink);
-  color: #fff;
-  box-shadow: 0 8px 20px -8px rgba(10, 13, 20, 0.5);
-}
-
 .btn-solid.live {
+  border: 0;
   background: linear-gradient(135deg, #0066ff, #0052cc);
-  box-shadow: 0 10px 24px -8px rgba(0, 102, 255, 0.55);
+  color: #fff;
+  box-shadow: 0 8px 20px -8px rgba(0, 102, 255, 0.5);
 }
 
 .btn-solid:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
-.btn-solid:disabled {
+.btn-solid:disabled,
+.btn-ghost:disabled {
   opacity: 0.6;
-  cursor: progress;
+  cursor: not-allowed;
 }
 
 .btn-spinner {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   border: 2px solid rgba(255, 255, 255, 0.4);
   border-top-color: #fff;
   border-radius: 50%;
@@ -1263,21 +1032,12 @@ onMounted(() => {
 }
 
 @keyframes composer-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-@media (max-width: 900px) {
-  .composer-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .composer-side {
-    border-left: 0;
-    border-top: 1px solid var(--c-line);
-    max-height: none;
-  }
-
-  .composer-meta,
+@media (max-width: 760px) {
   .foot-tip {
     display: none;
   }

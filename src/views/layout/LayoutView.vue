@@ -21,10 +21,14 @@ onMounted(async () => {
   }
 })
 
-function handleCommand(command) {
+async function handleCommand(command) {
   if (command !== 'logout') return
-  userStore.logout()
-  router.push('/login')
+  try {
+    await userStore.logoutRemotely()
+    router.push('/login')
+  } catch {
+    // Keep the session if the server could not revoke the token.
+  }
 }
 </script>
 

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { login as loginApi, getUserInfo as getUserInfoApi } from '@/api/user'
+import { login as loginApi, logout as logoutApi, getUserInfo as getUserInfoApi } from '@/api/user'
 import { useAiSettingsStore } from '@/stores/aiSettings'
 
 export const useUserStore = defineStore('user', () => {
@@ -44,5 +44,10 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('token')
   }
 
-  return { token, userInfo, login, fetchUserInfo, ensureUserInfo, logout }
+  async function logoutRemotely() {
+    if (token.value) await logoutApi()
+    logout()
+  }
+
+  return { token, userInfo, login, fetchUserInfo, ensureUserInfo, logout, logoutRemotely }
 })

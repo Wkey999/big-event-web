@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { listCategories } from '@/api/category'
 import ArticleCard from '@/components/ArticleCard.vue'
@@ -9,6 +9,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import ContentState from '@/components/ContentState.vue'
 import { useFeed } from '@/composables/useFeed'
 
+const VIEW_STYLE_KEY = 'boom:home-view-style'
 const router = useRouter()
 const {
   items,
@@ -29,6 +30,16 @@ const categories = ref([])
 const categoryError = ref(false)
 const aiQuestion = ref('')
 const denseView = ref(true)
+// 'pure' = 纯净流（极简视觉卡片+宽屏无干扰） | 'text' = 文字流（含内容速览摘要+周报大面板+右侧导览栏）
+const viewStyle = ref(localStorage.getItem(VIEW_STYLE_KEY) === 'text' ? 'text' : 'pure')
+
+watch(viewStyle, (val) => {
+  try {
+    localStorage.setItem(VIEW_STYLE_KEY, val)
+  } catch {
+    // ignore storage quota errors
+  }
+})
 
 const categoryNames = computed(() =>
   Object.fromEntries(categories.value.map((item) => [item.id, item.categoryName])),
@@ -36,9 +47,9 @@ const categoryNames = computed(() =>
 const activeCategory = computed(() => categoryNames.value[categoryId.value] || '全部发现')
 
 const quickPrompts = [
-  '有哪些关于 AI Agent 的开发实践？',
-  '推荐几篇关于开发工具的文章',
-  '帮我找几篇开源项目相关的文章',
+  { label: '# Agent 实践', title: '我的第一个 Agent', sub: '从一次工具调用开始', q: '有哪些关于 AI Agent 的开发实践？' },
+  { label: '# 开发工具', title: '真正留下的开发工具', sub: '看看使用之后的取舍', q: '推荐几篇关于开发工具的文章' },
+  { label: '# 开源项目', title: '开源项目阅读笔记', sub: '看懂，然后试着改一点', q: '帮我找几篇开源项目相关的文章' },
 ]
 
 async function loadCategories() {
@@ -60,10 +71,10 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="discovery-layout">
+  <div class="discovery-layout" :class="{ 'is-text-layout': viewStyle === 'text' }">
     <!-- 左侧雾透玻璃频道导航轨 -->
     <aside class="channel-rail surface">
-      <div class="rail-header">
+      <div v-if="viewStyle === 'text'" class="rail-header">
         <span class="section-label">CHANNELS</span>
         <strong>内容频道</strong>
       </div>
@@ -99,7 +110,14 @@ onMounted(() => {
         <span class="channel-text">休闲小游戏</span>
       </button>
 
-      <div class="rail-note">
+      <template v-if="viewStyle === 'pure'">
+        <RouterLink class="rail-compose-btn" :to="{ name: 'creator', query: { compose: '1' } }">
+          <AppIcon name="pen" :size="14" />
+          <span>写一篇内容</span>
+        </RouterLink>
+        <p class="rail-disclaimer">外部资讯仅存索引 · AI 供参考</p>
+      </template>
+      <div v-else class="rail-note">
         <span class="note-dot"></span>
         记录真实实践，交换前沿灵感。
       </div>
@@ -107,9 +125,9 @@ onMounted(() => {
 
     <!-- 中央主内容流 -->
     <section class="discovery-content">
-      <!-- 顶部社区横幅 + AI 灵感检索舱 -->
-      <header class="hero-glass-pod surface">
-        <div class="hero-top">
+      <!-- 顶部搜索舱：纯净流为单行紧凑条，文字流为完整 Hero 横幅 -->
+      <header class="hero-glass-pod surface" :class="{ 'is-compact': viewStyle === 'pure' }">
+        <div v-if="viewStyle === 'text'" class="hero-top">
           <div class="hero-copy">
             <span class="eyebrow">TECH · AI · COMMUNITY INSIGHTS</span>
             <h1>
@@ -125,7 +143,7 @@ onMounted(() => {
 
         <form class="ai-search-bar" @submit.prevent="ask()">
           <span class="ai-spark-badge">
-            <AppIcon name="spark" :size="15" />
+            <AppIcon name="spark" :size="14" />
             AI 检索
           </span>
           <input
@@ -134,21 +152,33 @@ onMounted(() => {
             aria-label="向 AI 提问"
             placeholder="让 AI 帮你检索站内文章，例如：找几篇适合入门的 Agent 开发实践…"
           />
+          <div v-if="viewStyle === 'pure'" class="quick-tags">
+            <button
+              v-for="item in quickPrompts"
+              :key="item.label"
+              type="button"
+              class="quick-tag"
+              @click="ask(item.q)"
+            >
+              {{ item.label }}
+            </button>
+          </div>
           <button class="button button-primary" type="submit">
             问 AI
-            <AppIcon name="external" :size="15" />
+            <AppIcon name="external" :size="14" />
           </button>
         </form>
       </header>
 
-      <!-- 今日必读 & AI 智能周报 Bento 舱 -->
+      <!-- 今日必读 & AI 智能周报（随 纯净流 / 文字流 自动切换形态） -->
       <AiBriefingCard
         :items="items"
         :category-names="categoryNames"
         :active-category="activeCategory"
+        :variant="viewStyle"
       />
 
-      <!-- 信息流控制栏（得物风高对比胶囊切换 + 视图密度控制） -->
+      <!-- 信息流控制栏（含「纯净流 / 文字流」方案一键切换） -->
       <div class="feed-heading">
         <div class="feed-tabs" role="group" aria-label="信息流模式">
           <button
@@ -169,14 +199,36 @@ onMounted(() => {
 
         <div class="feed-controls">
           <span class="feed-context">
-            {{ categoryId ? `${activeCategory}` : '按阅读价值与时效呈现' }}
-            <template v-if="total"> · 共 {{ total }} 篇</template>
+            {{ activeCategory }}<template v-if="total"> · 共 {{ total }} 篇</template>
           </span>
+
+          <!-- 核心：纯净流 vs 文字流 方案切换器 -->
+          <div class="flow-mode-switch" role="group" aria-label="首页流派方案切换">
+            <button
+              type="button"
+              :class="{ active: viewStyle === 'pure' }"
+              title="极简视觉海报卡片 + 宽屏网格"
+              @click="viewStyle = 'pure'"
+            >
+              <AppIcon name="eye" :size="13" />
+              纯净流
+            </button>
+            <button
+              type="button"
+              :class="{ active: viewStyle === 'text' }"
+              title="含内容速览长摘要 + 周报面板 + 导读边栏"
+              @click="viewStyle = 'text'"
+            >
+              <AppIcon name="document" :size="13" />
+              文字流
+            </button>
+          </div>
+
           <div class="density-switch" role="group" aria-label="卡片列数切换">
             <button
               type="button"
               :class="{ active: denseView }"
-              title="多列发现视图"
+              title="多列视图"
               @click="denseView = true"
             >
               <AppIcon name="grid" :size="14" />
@@ -185,7 +237,7 @@ onMounted(() => {
             <button
               type="button"
               :class="{ active: !denseView }"
-              title="双列精读视图"
+              title="双列视图"
               @click="denseView = false"
             >
               双栏
@@ -194,8 +246,8 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 规整有序的响应式网格流（消除估算高度瀑布流的错位与跳视） -->
-      <div class="feed-grid" :class="{ 'is-two-col': !denseView }">
+      <!-- 响应式网格流 -->
+      <div class="feed-grid" :class="{ 'is-two-col': !denseView, 'is-pure-grid': viewStyle === 'pure' }">
         <template v-if="loading && !items.length">
           <div v-for="i in 6" :key="i" class="feed-skeleton surface">
             <el-skeleton animated>
@@ -219,6 +271,7 @@ onMounted(() => {
               :article="article"
               :category-name="categoryNames[article.categoryId]"
               :mode="mode"
+              :variant="viewStyle"
             />
           </div>
         </template>
@@ -262,8 +315,8 @@ onMounted(() => {
       </div>
     </section>
 
-    <!-- 右侧辅助信息栏 -->
-    <aside class="discovery-sidebar">
+    <!-- 右侧辅助信息栏（仅在「文字流」模式下展示） -->
+    <aside v-if="viewStyle === 'text'" class="discovery-sidebar">
       <section class="community-note surface">
         <span class="section-label">CREATOR STUDIO</span>
         <h2>有用的内容，<br />真实的分享。</h2>
@@ -281,37 +334,13 @@ onMounted(() => {
         </div>
 
         <div class="explore-list">
-          <button @click="ask(quickPrompts[0])">
+          <button v-for="p in quickPrompts" :key="p.label" @click="ask(p.q)">
             <span class="prompt-hash">#</span>
             <span>
-              <strong>我的第一个 Agent</strong>
-              <small>从一次工具调用开始</small>
+              <strong>{{ p.title }}</strong>
+              <small>{{ p.sub }}</small>
             </span>
           </button>
-          <button @click="ask(quickPrompts[1])">
-            <span class="prompt-hash">#</span>
-            <span>
-              <strong>真正留下的开发工具</strong>
-              <small>看看使用之后的取舍</small>
-            </span>
-          </button>
-          <button @click="ask(quickPrompts[2])">
-            <span class="prompt-hash">#</span>
-            <span>
-              <strong>开源项目阅读笔记</strong>
-              <small>看懂，然后试着改一点</small>
-            </span>
-          </button>
-        </div>
-      </section>
-
-      <section class="reading-note surface">
-        <div class="reading-note-icon">
-          <AppIcon name="bookmark" :size="18" />
-        </div>
-        <div>
-          <h3>读到有用的，记得收藏</h3>
-          <p>在文章里留下一个赞与收藏，给认真分享的创作者一点回应。</p>
         </div>
       </section>
 
@@ -331,25 +360,31 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* 默认纯净流：双栏宽屏视觉布局 */
 .discovery-layout {
   display: grid;
-  grid-template-columns: 186px minmax(0, 1fr) 248px;
+  grid-template-columns: 186px minmax(0, 1fr);
   gap: 24px;
   align-items: start;
+}
+
+/* 文字流：三栏导读布局 */
+.discovery-layout.is-text-layout {
+  grid-template-columns: 186px minmax(0, 1fr) 248px;
 }
 
 /* 左侧雾透玻璃频道栏 */
 .channel-rail {
   position: sticky;
   top: 96px;
-  padding: 18px 12px;
+  padding: 16px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
 .rail-header {
-  padding: 2px 10px 10px;
+  padding: 2px 10px 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -359,7 +394,6 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 800;
   color: var(--ink);
-  letter-spacing: -0.3px;
 }
 
 .channel-list {
@@ -380,7 +414,8 @@ onMounted(() => {
   color: var(--text);
   font-size: 13px;
   font-weight: 600;
-  transition: all 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+  cursor: pointer;
+  transition: all 0.18s ease;
 }
 
 .channel-icon {
@@ -391,15 +426,10 @@ onMounted(() => {
   border-radius: 8px;
   background: rgba(15, 23, 42, 0.045);
   color: var(--muted);
-  transition: all 0.18s ease;
 }
 
 .channel-rail button:hover {
   background: rgba(15, 23, 42, 0.045);
-  color: var(--ink);
-}
-
-.channel-rail button:hover .channel-icon {
   color: var(--ink);
 }
 
@@ -422,20 +452,48 @@ onMounted(() => {
 .rail-divider {
   height: 1px;
   background: var(--line);
-  margin: 8px 6px;
+  margin: 6px 4px;
 }
 
 .rail-game-btn {
   color: var(--muted);
 }
 
+.rail-compose-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: var(--ink);
+  color: #ffffff;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background 0.18s ease;
+}
+
+.rail-compose-btn:hover {
+  background: var(--brand);
+}
+
+.rail-disclaimer {
+  margin: 8px 6px 2px;
+  font-size: 10.5px;
+  color: var(--muted);
+  text-align: center;
+  opacity: 0.75;
+}
+
 .rail-note {
-  margin-top: 14px;
-  padding: 12px 12px 4px;
+  margin-top: 10px;
+  padding: 10px 10px 2px;
   border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: 11px;
-  line-height: 1.75;
+  line-height: 1.7;
   display: flex;
   align-items: flex-start;
   gap: 7px;
@@ -450,19 +508,23 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-/* 顶部英雄区 + AI 检索舱 */
+/* 中央内容流 */
 .discovery-content {
   min-width: 0;
 }
 
 .hero-glass-pod {
-  padding: 22px 24px;
-  margin-bottom: 22px;
-  position: relative;
-  overflow: hidden;
+  padding: 20px 22px;
+  margin-bottom: 18px;
   background:
     radial-gradient(circle at 92% 12%, rgba(0, 102, 255, 0.1), transparent 45%),
     var(--glass-bg-strong);
+}
+
+.hero-glass-pod.is-compact {
+  padding: 8px;
+  margin-bottom: 14px;
+  border-radius: 16px;
 }
 
 .hero-top {
@@ -470,14 +532,13 @@ onMounted(() => {
   align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 
 .hero-copy h1 {
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 800;
-  letter-spacing: -0.9px;
-  line-height: 1.25;
+  letter-spacing: -0.8px;
   margin: 4px 0 0;
   color: var(--ink);
 }
@@ -490,14 +551,12 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 6px 12px;
+  padding: 5px 12px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.045);
-  border: 1px solid rgba(15, 23, 42, 0.06);
   font-size: 11.5px;
   font-weight: 600;
   color: var(--text);
-  white-space: nowrap;
 }
 
 .badge-live {
@@ -505,36 +564,33 @@ onMounted(() => {
   height: 7px;
   border-radius: 50%;
   background: var(--brand);
-  box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.18);
 }
 
 .ai-search-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  padding: 6px 6px 6px 12px;
-  border-radius: 14px;
-  box-shadow: 0 4px 16px -4px rgba(10, 13, 20, 0.05);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  border: 1px solid rgba(15, 23, 42, 0.09);
+  padding: 5px 6px 5px 10px;
+  border-radius: 12px;
 }
 
 .ai-search-bar:focus-within {
   border-color: var(--brand);
-  box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.12);
+  box-shadow: 0 0 0 3px rgba(0, 102, 255, 0.1);
 }
 
 .ai-spark-badge {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
+  gap: 4px;
+  padding: 4px 9px;
   border-radius: 8px;
   background: var(--soft);
   color: var(--brand);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 11.5px;
+  font-weight: 750;
   white-space: nowrap;
 }
 
@@ -542,38 +598,57 @@ onMounted(() => {
   border: 0;
   background: none;
   flex: 1;
-  min-width: 0;
+  min-width: 120px;
   padding: 6px 4px;
-  font-size: 13.5px;
+  font-size: 13px;
   color: var(--ink);
   outline: none;
 }
 
-.ai-search-bar input::placeholder {
-  color: #94a3b8;
+.quick-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quick-tag {
+  border: 0;
+  background: rgba(15, 23, 42, 0.045);
+  color: var(--muted);
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.quick-tag:hover {
+  color: var(--brand);
+  background: var(--soft);
 }
 
 .ai-search-bar .button {
-  padding: 9px 16px;
-  border-radius: 10px;
-  font-size: 12.5px;
+  padding: 8px 15px;
+  border-radius: 9px;
+  font-size: 12px;
 }
 
-/* 信息流切换控制栏 */
+/* 信息流控制栏 */
 .feed-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 0 0 18px;
+  margin: 0 0 16px;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .feed-tabs {
   display: inline-flex;
   gap: 4px;
   padding: 4px;
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(16px);
+  background: rgba(255, 255, 255, 0.75);
   border: 1px solid rgba(15, 23, 42, 0.07);
   border-radius: 999px;
 }
@@ -581,55 +656,60 @@ onMounted(() => {
 .feed-tabs button {
   border: 0;
   background: none;
-  padding: 7px 18px;
+  padding: 6px 16px;
   border-radius: 999px;
   color: var(--muted);
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 700;
-  transition: all 0.2s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.feed-tabs button:hover {
-  color: var(--ink);
+  cursor: pointer;
 }
 
 .feed-tabs button.active {
   background: var(--ink);
   color: #ffffff;
-  box-shadow: 0 4px 12px rgba(10, 13, 20, 0.15);
 }
 
 .feed-controls {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .feed-context {
   font-size: 12px;
-  font-weight: 500;
   color: var(--muted);
 }
 
+.flow-mode-switch,
 .density-switch {
   display: inline-flex;
   padding: 3px;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.7);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
   border: 1px solid var(--line);
 }
 
+.flow-mode-switch button,
 .density-switch button {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   border: 0;
   background: none;
-  padding: 4px 9px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 600;
+  padding: 5px 11px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  font-weight: 700;
   color: var(--muted);
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.flow-mode-switch button.active {
+  background: var(--brand);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 102, 255, 0.25);
 }
 
 .density-switch button.active {
@@ -637,7 +717,7 @@ onMounted(() => {
   color: #ffffff;
 }
 
-/* 规整信息流栅格：按真实阅读顺序排列，同行等高 */
+/* 栅格布局 */
 .feed-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -649,8 +729,8 @@ onMounted(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-@media (min-width: 1660px) {
-  .feed-grid:not(.is-two-col) {
+@media (min-width: 1440px) {
+  .feed-grid.is-pure-grid:not(.is-two-col) {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
@@ -672,62 +752,57 @@ onMounted(() => {
 .feed-bottom {
   display: flex;
   justify-content: center;
-  min-height: 60px;
+  min-height: 56px;
   align-items: center;
   color: var(--muted);
   font-size: 12.5px;
-  font-weight: 500;
-  margin-top: 22px;
+  margin-top: 20px;
 }
 
 .loading-pill {
-  padding: 7px 16px;
+  padding: 6px 14px;
   border-radius: 999px;
   background: var(--glass-bg);
   border: var(--glass-outline);
 }
 
-/* 右侧边栏 */
+/* 右侧边栏（文字流） */
 .discovery-sidebar {
   position: sticky;
   top: 96px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
-.community-note {
-  padding: 22px 20px;
+.community-note,
+.explore-section {
+  padding: 18px;
 }
 
 .community-note h2 {
-  font-size: 21px;
+  font-size: 19px;
   font-weight: 800;
   line-height: 1.38;
-  letter-spacing: -0.6px;
-  margin: 8px 0 10px;
+  margin: 6px 0 8px;
   color: var(--ink);
 }
 
 .community-note p {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--muted);
-  line-height: 1.75;
-  margin-bottom: 18px;
+  line-height: 1.7;
+  margin-bottom: 14px;
 }
 
 .creator-cta {
   width: 100%;
 }
 
-.explore-section {
-  padding: 20px;
-}
-
 .explore-header h2 {
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 800;
-  margin: 4px 0 12px;
+  margin: 4px 0 10px;
   color: var(--ink);
 }
 
@@ -740,21 +815,20 @@ onMounted(() => {
 .explore-list button {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 10px;
+  gap: 9px;
+  padding: 9px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 11px;
   background: rgba(15, 23, 42, 0.025);
   text-align: left;
   width: 100%;
-  font-size: 12.5px;
-  transition: all 0.18s ease;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .explore-list button:hover {
   background: #ffffff;
   border-color: rgba(0, 102, 255, 0.22);
-  transform: translateX(2px);
 }
 
 .prompt-hash {
@@ -762,16 +836,12 @@ onMounted(() => {
   place-items: center;
   background: var(--ink);
   color: #ffffff;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
   font-weight: 700;
-  font-size: 12px;
+  font-size: 11px;
   flex-shrink: 0;
-}
-
-.explore-list button:hover .prompt-hash {
-  background: var(--brand);
 }
 
 .explore-list strong {
@@ -783,74 +853,62 @@ onMounted(() => {
 .explore-list small {
   display: block;
   font-size: 11px;
-  margin-top: 2px;
   color: var(--muted);
-}
-
-.reading-note {
-  padding: 18px;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.reading-note-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: var(--soft);
-  color: var(--brand);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
-
-.reading-note h3 {
-  font-size: 13.5px;
-  font-weight: 700;
-  margin: 0 0 4px;
-  color: var(--ink);
-}
-
-.reading-note p {
-  font-size: 11.5px;
-  color: var(--muted);
-  line-height: 1.65;
-  margin: 0;
 }
 
 .disclaimer-card {
-  padding: 16px 18px;
-  background: rgba(255, 255, 255, 0.58);
+  padding: 14px 16px;
 }
 
 .disclaimer-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.6px;
+  font-size: 11.5px;
   color: var(--ink);
-  margin-bottom: 8px;
-}
-
-.disclaimer-header > svg {
-  color: var(--brand);
+  margin-bottom: 6px;
 }
 
 .disclaimer-card p {
-  font-size: 11px;
+  font-size: 11.5px;
+  line-height: 1.65;
   color: var(--muted);
-  line-height: 1.72;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
 }
 
 .disclaimer-card small {
-  display: block;
-  font-size: 10px;
-  font-weight: 600;
-  color: #94a3b8;
-  letter-spacing: 0.4px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+
+@media (max-width: 1180px) {
+  .discovery-layout.is-text-layout {
+    grid-template-columns: 184px minmax(0, 1fr);
+  }
+  .discovery-sidebar {
+    display: none;
+  }
+}
+
+@media (max-width: 920px) {
+  .discovery-layout,
+  .discovery-layout.is-text-layout {
+    grid-template-columns: 1fr;
+  }
+  .channel-rail {
+    position: static;
+  }
+  .quick-tags {
+    display: none;
+  }
+  .feed-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .feed-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

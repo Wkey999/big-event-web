@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { askArticle } from '@/api/article'
 import { useAiSettingsStore } from '@/stores/aiSettings'
@@ -11,6 +11,7 @@ const props = defineProps({
   items: { type: Array, default: () => [] },
   categoryNames: { type: Object, default: () => ({}) },
   activeCategory: { type: String, default: '全部发现' },
+  variant: { type: String, default: 'pure' }, // 'pure' | 'text'
 })
 
 const ai = useAiSettingsStore()
@@ -19,12 +20,20 @@ const loading = ref(false)
 const aiAnswer = ref('')
 const aiReferences = ref([])
 const errorMsg = ref('')
-const expanded = ref(true)
+const expanded = ref(props.variant === 'text')
+
+watch(
+  () => props.variant,
+  (v) => {
+    expanded.value = v === 'text' || Boolean(aiAnswer.value)
+  },
+)
 
 const BRIEF_MODES = [
   {
     id: 'weekly',
     label: 'AI 社区周报',
+    shortLabel: '本周周报',
     badge: 'WEEKLY DIGEST',
     prompt:
       '请调用工具检索最近一周发布的社区文章，为我生成一份结构清晰的「BOOM 社区本周必读周报」，总结核心技术与热点看点，并结合我的偏好推荐值得精读的文章。',
@@ -32,6 +41,7 @@ const BRIEF_MODES = [
   {
     id: 'today',
     label: '今日必读盘点',
+    shortLabel: '今日必读',
     badge: 'TODAY MUST-READ',
     prompt:
       '请帮我盘点总结社区最新发布的必读文章（若24小时内较少可结合近期热门内容），按主题提炼今日必看亮点与推荐理由。',
@@ -39,6 +49,7 @@ const BRIEF_MODES = [
   {
     id: 'personal',
     label: 'AI 个性化推荐',
+    shortLabel: '个性化推荐',
     badge: 'FOR YOU',
     prompt:
       '请先读取我的阅读偏好画像，再检索匹配的社区已发布文章，为我生成一份专属的「今日推荐阅读清单」并说明推荐理由。',
@@ -49,11 +60,11 @@ const currentModeObj = computed(
   () => BRIEF_MODES.find((m) => m.id === briefType.value) || BRIEF_MODES[0],
 )
 
-// 从当前真实文章流中提炼 Top 3 必读精选（零延迟展示）
 const mustReadPicks = computed(() => {
   if (!props.items || !props.items.length) return []
   const sorted = [...props.items].sort(
-    (a, b) => (b.likeCount || 0) * 3 + (b.viewCount || 0) - ((a.likeCount || 0) * 3 + (a.viewCount || 0)),
+    (a, b) =>
+      (b.likeCount || 0) * 3 + (b.viewCount || 0) - ((a.likeCount || 0) * 3 + (a.viewCount || 0)),
   )
   return sorted.slice(0, 3).map((item, idx) => ({
     ...item,
@@ -98,7 +109,7 @@ async function generateBriefing() {
   } catch (err) {
     errorMsg.value =
       err.code === 'ECONNABORTED'
-        ? 'AI 总结生成耗时较长，请稍后重试。'
+        ? 'AI 总结耗时较长，请稍后重试。'
         : err.response?.data?.message || err.message || 'AI 总结生成失败，请检查模型配置。'
   } finally {
     loading.value = false
@@ -108,8 +119,80 @@ async function generateBriefing() {
 </script>
 
 <template>
-  <section class="briefing-bento surface" aria-label="AI 周报与今日必读">
-    <!-- 顶部栏 -->
+  <!-- 形态 1：纯净流（单行胶囊吧台，按需展开） -->
+  <section v-if="variant === 'pure'" class="briefing-bar surface" aria-label="AI 智能速览">
+    <div class="bar-top">
+      <div class="bar-left">
+        <span class="briefing-badge">
+          <AppIcon name="spark" :size="13" />
+          AI 速览
+        </span>
+        <div class="mode-pills" role="group" aria-label="速览模式">
+          <button
+            v-for="m in BRIEF_MODES"
+            :key="m.id"
+            type="button"
+            :class="{ active: briefType === m.id }"
+            :disabled="loading"
+            @click="briefType = m.id"
+          >
+            {{ m.shortLabel }}
+          </button>
+        </div>
+      </div>
+
+      <div class="bar-right">
+        <button
+          type="button"
+          class="button button-primary generate-btn"
+          :disabled="loading"
+          @click="generateBriefing"
+        >
+          <AppIcon :name="loading ? 'refresh' : 'spark'" :size="13" />
+          {{ loading ? '生成中…' : aiAnswer ? '重新生成' : '一键生成' }}
+        </button>
+        <button
+          v-if="aiAnswer || errorMsg"
+          type="button"
+          class="toggle-btn"
+          @click="expanded = !expanded"
+        >
+          {{ expanded ? '收起' : '展开' }}
+        </button>
+      </div>
+    </div>
+
+    <div v-if="expanded && (loading || errorMsg || aiAnswer)" class="briefing-drawer">
+      <div v-if="loading" class="drawer-loading">
+        <el-skeleton :rows="3" animated />
+      </div>
+
+      <div v-else-if="errorMsg" class="drawer-error">
+        <span>{{ errorMsg }}</span>
+        <button type="button" class="text-action" @click="ai.openSettings()">API 配置</button>
+      </div>
+
+      <div v-else-if="aiAnswer" class="drawer-result">
+        <div class="result-scroll">
+          <AnswerText :text="aiAnswer" />
+        </div>
+        <div v-if="aiReferences.length" class="result-refs">
+          <RouterLink
+            v-for="(refItem, idx) in aiReferences.slice(0, 4)"
+            :key="refItem.id"
+            :to="{ name: 'read', params: { id: refItem.id }, query: { mode: 'ask' } }"
+            class="mini-ref-chip"
+          >
+            <span class="ref-idx">{{ idx + 1 }}</span>
+            <span class="ref-title">{{ refItem.title }}</span>
+          </RouterLink>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 形态 2：文字流（完整双栏 Bento：今日必读精选 TOP 3 + AI 周报舱） -->
+  <section v-else class="briefing-bento surface" aria-label="AI 周报与今日必读">
     <header class="briefing-header">
       <div class="briefing-title-group">
         <span class="briefing-badge">
@@ -138,7 +221,6 @@ async function generateBriefing() {
     </header>
 
     <div v-show="expanded" class="briefing-grid">
-      <!-- 左栏：实时提炼「今日必读 TOP 3」 -->
       <div class="must-read-col">
         <div class="col-head">
           <span class="col-eyebrow">TODAY'S PICKS</span>
@@ -168,7 +250,6 @@ async function generateBriefing() {
         <div v-else class="picks-empty">正在从社区信息流同步今日必读文章…</div>
       </div>
 
-      <!-- 右栏：Spring AI 驱动的「AI 周报 / 今日总结生成器」 -->
       <div class="ai-summary-col">
         <div class="ai-col-head">
           <div class="mode-pills" role="group" aria-label="周报模式切换">
@@ -195,36 +276,15 @@ async function generateBriefing() {
           </button>
         </div>
 
-        <!-- 状态 1：加载中 -->
         <div v-if="loading" class="ai-summary-loading">
-          <div class="loading-title">
-            <AppIcon name="spark" :size="16" />
-            <span>Spring AI 正在检索站内文章并结合你的偏好生成「{{ currentModeObj.label }}」…</span>
-          </div>
           <el-skeleton :rows="4" animated />
         </div>
 
-        <!-- 状态 2：错误提示 -->
         <div v-else-if="errorMsg" class="ai-summary-error">
           <p>{{ errorMsg }}</p>
-          <div>
-            <button type="button" class="button button-secondary" @click="generateBriefing">
-              重试生成
-            </button>
-            <button type="button" class="text-action" @click="ai.openSettings()">
-              检查 API 配置
-            </button>
-          </div>
         </div>
 
-        <!-- 状态 3：已生成真实 AI 周报 -->
         <div v-else-if="aiAnswer" class="ai-summary-result">
-          <div class="result-badge-row">
-            <span class="result-badge">✦ {{ currentModeObj.label }} · AI 实时生成</span>
-            <span v-if="aiReferences.length" class="ref-count">
-              引用了 {{ aiReferences.length }} 篇站内真实文章
-            </span>
-          </div>
           <div class="result-scroll">
             <AnswerText :text="aiAnswer" />
           </div>
@@ -237,29 +297,19 @@ async function generateBriefing() {
             >
               <span class="ref-idx">{{ idx + 1 }}</span>
               <span class="ref-title">{{ refItem.title }}</span>
-              <AppIcon name="external" :size="12" />
             </RouterLink>
           </div>
         </div>
 
-        <!-- 状态 4：默认导览态（未调用大模型前零消耗展示） -->
-        <div v-else class="ai-summary- standby">
-          <div class="standby-card">
-            <div class="standby-top">
-              <span class="standby-code">{{ currentModeObj.badge }}</span>
-              <span class="standby-hint">按需调用 Spring AI · 不自动消耗额度</span>
-            </div>
-            <h3>用 AI 快速浓缩本周技术热点与必读清单</h3>
-            <p>
-              点击右上角
-              <strong>「AI 一键生成周报」</strong>，后端智能体将自动调用文章检索工具（<code>query_published_articles</code>）与你的个人兴趣画像（<code>get_my_preference_profile</code>），为你生成带真实文章引用的定制周报。
-            </p>
-            <div class="standby-highlights">
-              <span>✦ 检索近 7 天真实文章</span>
-              <span>✦ 结合个人阅读偏好推荐</span>
-              <span>✦ 附可点击核对的原文引用</span>
-            </div>
+        <div v-else class="standby-card">
+          <div class="standby-top">
+            <span class="standby-code">{{ currentModeObj.badge }}</span>
+            <span class="standby-hint">按需调用 Spring AI · 不自动消耗额度</span>
           </div>
+          <h3>用 AI 快速浓缩本周技术热点与必读清单</h3>
+          <p>
+            点击右上角 <strong>「AI 一键生成周报」</strong>，自动检索站内近 7 天文章并结合你的阅读偏好生成带真实引用的周报。
+          </p>
         </div>
       </div>
     </div>
@@ -267,9 +317,33 @@ async function generateBriefing() {
 </template>
 
 <style scoped>
+/* 纯净流单行胶囊条 */
+.briefing-bar {
+  padding: 10px 14px;
+  margin-bottom: 18px;
+  border-radius: 16px;
+}
+
+.bar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bar-left,
+.bar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 文字流 Bento 面板 */
 .briefing-bento {
-  padding: 20px 22px;
-  margin-bottom: 22px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
   background:
     radial-gradient(circle at 8% 0%, rgba(0, 102, 255, 0.08), transparent 42%),
     var(--glass-bg-strong);
@@ -280,14 +354,14 @@ async function generateBriefing() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 14px;
   flex-wrap: wrap;
 }
 
 .briefing-title-group {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -301,17 +375,12 @@ async function generateBriefing() {
   color: #ffffff;
   font-size: 10.5px;
   font-weight: 800;
-  letter-spacing: 0.8px;
-}
-
-.briefing- badge :deep(svg) {
-  color: #60a5fa;
+  letter-spacing: 0.6px;
 }
 
 .briefing-title-group h2 {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 800;
-  letter-spacing: -0.4px;
   margin: 0;
   color: var(--ink);
 }
@@ -324,7 +393,7 @@ async function generateBriefing() {
 .briefing-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .api-config-pill {
@@ -338,12 +407,7 @@ async function generateBriefing() {
   font-size: 11px;
   font-weight: 600;
   color: var(--text);
-  transition: all 0.18s ease;
-}
-
-.api-config-pill:hover {
-  border-color: var(--brand);
-  color: var(--brand);
+  cursor: pointer;
 }
 
 .status-dot {
@@ -355,45 +419,40 @@ async function generateBriefing() {
 
 .status-dot.ready {
   background: #10b981;
-  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
 }
 
-.toggle-collapse-btn {
+.toggle-collapse-btn,
+.toggle-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 5px 10px;
-  border-radius: 8px;
+  border-radius: 999px;
   border: 0;
-  background: rgba(15, 23, 42, 0.045);
+  background: rgba(15, 23, 42, 0.05);
   font-size: 11.5px;
   font-weight: 600;
   color: var(--muted);
-}
-
-.toggle-collapse-btn:hover {
-  color: var(--ink);
+  cursor: pointer;
 }
 
 .rotated {
   transform: rotate(180deg);
 }
 
-/* 双栏 Bento 主体 */
 .briefing-grid {
   display: grid;
   grid-template-columns: 1fr 1.15fr;
-  gap: 18px;
-  margin-top: 16px;
-  padding-top: 16px;
+  gap: 16px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid var(--line);
 }
 
-/* 左栏：今日必读精选 */
 .must-read-col {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -406,20 +465,17 @@ async function generateBriefing() {
 .col-eyebrow {
   font-size: 10px;
   font-weight: 800;
-  letter-spacing: 1px;
   color: var(--brand);
 }
 
 .col-head strong {
-  font-size: 13.5px;
-  font-weight: 800;
+  font-size: 13px;
   color: var(--ink);
 }
 
 .col-tag {
   margin-left: auto;
   font-size: 10.5px;
-  font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.05);
@@ -429,40 +485,32 @@ async function generateBriefing() {
 .picks-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
 }
 
 .pick-item {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.8);
-  border: 1px solid rgba(15, 23, 42, 0.065);
+  padding: 9px 11px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(15, 23, 42, 0.06);
   text-decoration: none;
   color: inherit;
-  transition: all 0.18s ease;
-}
-
-.pick-item:hover {
-  background: #ffffff;
-  border-color: rgba(0, 102, 255, 0.28);
-  transform: translateX(2px);
 }
 
 .pick-rank {
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
-  font-size: 11px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  font-size: 10.5px;
   font-weight: 800;
   background: var(--ink);
   color: #ffffff;
   flex-shrink: 0;
-  margin-top: 2px;
 }
 
 .pick-rank.rank-1 {
@@ -476,11 +524,9 @@ async function generateBriefing() {
 
 .pick-meta {
   display: flex;
-  align-items: center;
   gap: 6px;
   font-size: 10.5px;
   color: var(--muted);
-  margin-bottom: 3px;
 }
 
 .pick-cat {
@@ -489,155 +535,89 @@ async function generateBriefing() {
 }
 
 .pick-body h3 {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 700;
   color: var(--ink);
-  margin: 0 0 3px;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
+  margin: 2px 0;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pick-body p {
   font-size: 11.5px;
   color: var(--muted);
   margin: 0;
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.pick-arrow {
-  color: var(--muted);
-  margin-top: 4px;
-  flex-shrink: 0;
-}
-
-.picks-empty {
-  padding: 28px 16px;
-  text-align: center;
-  font-size: 12px;
-  color: var(--muted);
-  background: rgba(255, 255, 255, 0.5);
-  border-radius: 12px;
-}
-
-/* 右栏：AI 周报生成区 */
 .ai-summary-col {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.8);
   border: 1px solid rgba(0, 102, 255, 0.14);
-  border-radius: 14px;
-  padding: 14px 16px;
+  border-radius: 13px;
+  padding: 13px 15px;
 }
 
 .ai-col-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 
 .mode-pills {
   display: inline-flex;
-  gap: 4px;
+  gap: 3px;
   padding: 3px;
-  border-radius: 9px;
+  border-radius: 999px;
   background: rgba(15, 23, 42, 0.05);
 }
 
 .mode-pills button {
   border: 0;
   background: none;
-  padding: 5px 10px;
-  border-radius: 7px;
+  padding: 4px 10px;
+  border-radius: 999px;
   font-size: 11.5px;
-  font-weight: 700;
+  font-weight: 650;
   color: var(--muted);
-  transition: all 0.16s ease;
+  cursor: pointer;
 }
 
 .mode-pills button.active {
   background: #ffffff;
   color: var(--ink);
-  box-shadow: 0 2px 6px rgba(10, 13, 20, 0.08);
+  box-shadow: 0 1px 4px rgba(10, 13, 20, 0.08);
 }
 
 .generate-btn {
-  padding: 7px 14px;
+  padding: 6px 14px;
   font-size: 12px;
   border-radius: 999px;
-  background: linear-gradient(135deg, #0066ff 0%, #004ecc 100%);
 }
 
-.ai-summary-loading {
-  padding: 12px 4px;
+.briefing-drawer {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
-.loading-title {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--brand);
-  margin-bottom: 12px;
-}
-
+.drawer-error,
 .ai-summary-error {
-  padding: 14px;
-  border-radius: 10px;
-  background: rgba(254, 242, 242, 0.85);
-  border: 1px solid rgba(239, 68, 68, 0.2);
   font-size: 12.5px;
   color: #b91c1c;
-}
-
-.ai-summary-error > div {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 10px;
-}
-
-.ai-summary-result {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.result-badge-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.result-badge {
-  font-size: 11px;
-  font-weight: 800;
-  color: var(--brand);
-  background: var(--soft);
-  padding: 3px 9px;
-  border-radius: 6px;
-}
-
-.ref-count {
-  font-size: 11px;
-  color: var(--muted);
 }
 
 .result-scroll {
   max-height: 210px;
   overflow-y: auto;
-  padding-right: 6px;
   font-size: 13px;
   line-height: 1.75;
 }
@@ -646,8 +626,7 @@ async function generateBriefing() {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--line);
+  margin-top: 8px;
 }
 
 .mini-ref-chip {
@@ -655,29 +634,21 @@ async function generateBriefing() {
   align-items: center;
   gap: 5px;
   padding: 4px 9px;
-  border-radius: 7px;
+  border-radius: 999px;
   background: rgba(15, 23, 42, 0.04);
-  border: 1px solid rgba(15, 23, 42, 0.06);
   text-decoration: none;
   font-size: 11px;
   color: var(--text);
-  max-width: 240px;
-  transition: all 0.16s ease;
-}
-
-.mini-ref-chip:hover {
-  border-color: var(--brand);
-  color: var(--brand);
-  background: #ffffff;
+  max-width: 230px;
 }
 
 .ref-idx {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
   background: var(--brand);
   color: #ffffff;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 800;
   display: grid;
   place-items: center;
@@ -688,65 +659,44 @@ async function generateBriefing() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 600;
 }
 
 .standby-card {
   padding: 12px 14px;
-  border-radius: 11px;
-  background: linear-gradient(135deg, rgba(10, 13, 20, 0.03), rgba(0, 102, 255, 0.04));
-  border: 1px dashed rgba(0, 102, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(0, 102, 255, 0.03);
+  border: 1px dashed rgba(0, 102, 255, 0.2);
 }
 
 .standby-top {
   display: flex;
-  align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  font-size: 10.5px;
+  color: var(--muted);
+  margin-bottom: 5px;
 }
 
 .standby-code {
-  font-size: 10px;
   font-weight: 800;
-  letter-spacing: 1.2px;
   color: var(--brand);
-  font-family: 'SF Mono', 'JetBrains Mono', Consolas, monospace;
-}
-
-.standby-hint {
-  font-size: 10.5px;
-  color: var(--muted);
 }
 
 .standby-card h3 {
-  font-size: 14px;
-  font-weight: 800;
+  font-size: 13.5px;
+  margin: 0 0 5px;
   color: var(--ink);
-  margin: 0 0 6px;
 }
 
 .standby-card p {
   font-size: 12px;
-  line-height: 1.7;
+  line-height: 1.65;
   color: var(--text);
-  margin: 0 0 10px;
+  margin: 0;
 }
 
-.standby-card code {
-  font-size: 11px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(15, 23, 42, 0.06);
-  color: var(--ink);
-}
-
-.standby-highlights {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--brand);
+@media (max-width: 960px) {
+  .briefing-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

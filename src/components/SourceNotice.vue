@@ -71,12 +71,12 @@ const digest = computed(() => getStructuredArticleDigest(props.article, props.ca
       </div>
     </div>
 
-    <!-- 站内精编导读正文 -->
+    <!-- 站内来源速览 -->
     <section class="digest-article-body">
       <div class="digest-section">
         <div class="digest-section-head">
           <span class="section-index">01</span>
-          <h2>内容速览与背景导读</h2>
+          <h2>报道速览</h2>
         </div>
         <p class="digest-lead">{{ digest.summary }}</p>
         <p class="digest-context">{{ digest.domainContext }}</p>
@@ -85,7 +85,7 @@ const digest = computed(() => getStructuredArticleDigest(props.article, props.ca
       <div class="digest-section">
         <div class="digest-section-head">
           <span class="section-index">02</span>
-          <h2>核心看点提炼</h2>
+          <h2>来源与阅读提示</h2>
         </div>
         <ul class="takeaway-list">
           <li v-for="(point, index) in digest.keyPoints" :key="index">
@@ -108,7 +108,7 @@ const digest = computed(() => getStructuredArticleDigest(props.article, props.ca
         <div>
           <span class="eyebrow">READ AT THE SOURCE</span>
           <h2>前往原网站，继续阅读完整原文</h2>
-          <p>这是一条外部文章推荐，站内提供精编导读与来源档案，完整正文与配图在原网站阅读。</p>
+          <p>这是一条外部文章推荐，站内提供标题与来源信息，完整正文与配图在原网站阅读。</p>
         </div>
         <a
           v-if="link"
