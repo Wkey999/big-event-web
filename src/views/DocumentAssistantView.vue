@@ -10,7 +10,7 @@ const ai = useAiSettingsStore()
 const text = ref('')
 const question = ref('')
 const runMode = ref('extractive') // 'extractive' | 'ai'
-const strategy = ref('bm25') // 'bm25' | 'hybrid' | 'tfidf' | 'overlap'
+const strategy = ref('hybrid') // 'hybrid' | 'vector' | 'bm25' | 'tfidf' | 'overlap'
 const result = ref(null)
 const loading = ref(false)
 const extracting = ref(false)
@@ -65,8 +65,9 @@ const presets = [
 ]
 
 const strategyLabels = {
+  hybrid: 'FAISS 向量 + BM25 混合 RRF',
+  vector: 'FAISS IndexFlatIP 稠密向量检索',
   bm25: 'BM25 稀疏加权检索',
-  hybrid: 'Hybrid RRF 混合融合',
   tfidf: 'TF-IDF 余弦相似度',
   overlap: '2-gram 词集重叠基线',
 }
@@ -269,8 +270,9 @@ function clear() {
           <div class="config-field">
             <label for="retrieval-strategy">检索算法策略</label>
             <select id="retrieval-strategy" v-model="strategy">
-              <option value="bm25">BM25 稀疏加权检索（默认推荐）</option>
-              <option value="hybrid">Hybrid RRF（BM25 + TF-IDF 倒数秩融合）</option>
+              <option value="hybrid">Hybrid RRF（FAISS 稠密向量 + BM25 双路混合 · 推荐）</option>
+              <option value="vector">FAISS IndexFlatIP（512 维稠密向量检索）</option>
+              <option value="bm25">BM25 稀疏词频加权检索</option>
               <option value="tfidf">TF-IDF 余弦相似度</option>
               <option value="overlap">2-gram 词集重叠（Baseline 对照基线）</option>
             </select>

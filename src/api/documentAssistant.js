@@ -1,5 +1,8 @@
 import request from '@/utils/request'
 
+// 前端入口显隐用：只返回开关状态，不探测 Python 侧车
+export const getAssistantStatus = () => request.get('/document/assistant/status', { silent: true })
+
 export const analyzeDocument = (
   text,
   question = '',

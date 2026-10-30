@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { useFeaturesStore } from '@/stores/features'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -29,6 +30,7 @@ const router = createRouter({
         { path: 'articles', name: 'admin-articles', component: () => import('@/views/article/ArticleManageView.vue') },
         { path: 'categories', name: 'admin-categories', component: () => import('@/views/category/CategoryManageView.vue') },
         { path: 'feeds', name: 'admin-feeds', component: () => import('@/views/FeedManageView.vue') },
+        { path: 'settings', name: 'admin-settings', component: () => import('@/views/admin/SettingsView.vue') },
       ],
     },
     { path: '/article', redirect: '/creator' },
@@ -54,5 +56,10 @@ router.beforeEach(async (to) => {
     return { name: 'home' }
   }
   if (to.name === 'login' || to.name === 'register') return { name: 'home' }
+  if (to.name === 'documents') {
+    const features = useFeaturesStore()
+    const enabled = await features.loadAssistant()
+    if (!enabled) return { name: 'home' }
+  }
 })
 export default router

@@ -1,8 +1,9 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useAiSettingsStore } from '@/stores/aiSettings'
+import { useFeaturesStore } from '@/stores/features'
 import BrandMark from '@/components/BrandMark.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import UserAvatar from '@/components/UserAvatar.vue'
@@ -11,7 +12,12 @@ const route = useRoute()
 const router = useRouter()
 const user = useUserStore()
 const ai = useAiSettingsStore()
+const features = useFeaturesStore()
 const keyword = ref('')
+onMounted(() => {
+  // 开关关闭时入口不渲染；store 内做了 60 秒缓存，避免每次切换页面都请求
+  features.loadAssistant()
+})
 const name = computed(() => user.userInfo?.nickname || user.userInfo?.username || '我的账号')
 
 watch(
@@ -61,7 +67,7 @@ async function command(value) {
             <AppIcon name="chart" :size="15" />
             AI 榜单
           </RouterLink>
-          <RouterLink to="/documents" :class="{ active: route.name === 'documents' }">
+          <RouterLink v-if="features.assistantEnabled" to="/documents" :class="{ active: route.name === 'documents' }">
             <AppIcon name="document" :size="15" />
             文档助手
           </RouterLink>
