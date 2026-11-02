@@ -10,7 +10,7 @@ const ai = useAiSettingsStore()
 const text = ref('')
 const question = ref('')
 const runMode = ref('extractive') // 'extractive' | 'ai'
-const strategy = ref('hybrid') // 'hybrid' | 'vector' | 'bm25' | 'tfidf' | 'overlap'
+const strategy = ref('bm25') // Match the backend's default; vector/hybrid are optional.
 const result = ref(null)
 const loading = ref(false)
 const extracting = ref(false)
@@ -84,8 +84,8 @@ const modeBadgeText = computed(() => {
   if (!result.value) return ''
   const m = result.value.mode
   if (m === 'rag') return 'RAG 有据生成 · 引用编号已由服务端核验'
-  if (m === 'rag-refused') return 'RAG 无证据自动拒答 · 已拦截大模型调用（0 额度消耗）'
-  return '摘录与分块检索基线 · 无模型生成（0 Token 消耗）'
+  if (m === 'rag-refused') return '未检索到相关片段 · 未生成回答，不扣聊天体验次数'
+  return '原文摘录与片段检索 · 未调用聊天模型'
 })
 
 watch(
@@ -270,9 +270,9 @@ function clear() {
           <div class="config-field">
             <label for="retrieval-strategy">检索算法策略</label>
             <select id="retrieval-strategy" v-model="strategy">
-              <option value="hybrid">Hybrid RRF（FAISS 稠密向量 + BM25 双路混合 · 推荐）</option>
-              <option value="vector">FAISS IndexFlatIP（512 维稠密向量检索）</option>
-              <option value="bm25">BM25 稀疏词频加权检索</option>
+              <option value="hybrid">Hybrid RRF（FAISS 向量 + BM25 混合）</option>
+              <option value="vector">FAISS 向量检索（编码方式由服务端配置）</option>
+              <option value="bm25">BM25 稀疏词频加权检索（默认）</option>
               <option value="tfidf">TF-IDF 余弦相似度</option>
               <option value="overlap">2-gram 词集重叠（Baseline 对照基线）</option>
             </select>
@@ -286,7 +286,7 @@ function clear() {
                 :class="['mode-btn', { active: runMode === 'extractive' }]"
                 @click="runMode = 'extractive'"
               >
-                仅原文摘录基线（0 消耗）
+                仅原文摘录（不调用聊天模型）
               </button>
               <button
                 type="button"
@@ -298,6 +298,10 @@ function clear() {
             </div>
           </div>
         </div>
+
+        <p v-if="strategy === 'vector' || strategy === 'hybrid'" class="counter">
+          向量检索可能调用服务端配置的远程向量服务，即使只摘录原文，也可能产生该服务的费用。
+        </p>
 
         <div v-if="runMode === 'ai'" class="ai-quota-bar">
           <div>
